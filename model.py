@@ -20,7 +20,7 @@ if not os.path.exists(RESULTS_FOLDER):
     os.makedirs(RESULTS_FOLDER)
 
 
-EPOCHS = 100
+EPOCHS = 1000
 BATCH_SIZE = 64
 LEARNING_RATE = 1e-4
 
@@ -267,7 +267,10 @@ accuracy = tf.reduce_mean(tf.cast(
 train = tf.train.AdamOptimizer(LEARNING_RATE).minimize(loss)
 
 
-with tf.Session() as sess:
+config = tf.ConfigProto()
+config.gpu_options.allow_growth = True
+
+with tf.Session(config=config) as sess:
     coord = tf.train.Coordinator()
 
     sess.run(tf.local_variables_initializer())
