@@ -2,7 +2,7 @@ import tensorflow as tf
 import tensorflow.contrib.layers as layers
 
 
-def vae(inputs, input_dim, rec_hidden_units, latent_dim, gen_hidden_units, activation=tf.nn.softplus):
+def vae(inputs, input_dim, rec_hidden_units, latent_dim, gen_hidden_units, likelihood_std=0.0, activation=tf.nn.softplus):
 
     input_size = tf.shape(inputs)[0]
 
@@ -20,8 +20,13 @@ def vae(inputs, input_dim, rec_hidden_units, latent_dim, gen_hidden_units, activ
     for units in gen_hidden_units:
         next_layer = layers.fully_connected(next_layer, units, activation_fn=activation)
 
+    generative_mean = layers.fully_connected(next_layer, input_dim, activation_fn=None)
+    standard_normal_sample2 = tf.random_normal([input_size, input_dim])
+
+    generative_sample = generative_mean + standard_normal_sample2 * likelihood_std
+
     reconstruction = tf.nn.sigmoid(
-        layers.fully_connected(next_layer, input_dim, activation_fn=None)
+        generative_sample
     )
 
     return reconstruction, recognition_mean, recognition_log_variance
