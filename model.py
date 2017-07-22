@@ -185,8 +185,8 @@ def body(step, not_finished, prev_state, inputs,
     # previous value of not_finished is used
     # to account for KL of first z_pres=0
     running_loss += not_finished * (
-        z_pres_probs[:, 0] * (tf.log(z_pres_probs[:, 0]) - tf.log(z_pres_prior)) +
-        z_pres_probs[:, 1] * (tf.log(z_pres_probs[:, 1]) - tf.log(1.0 - z_pres_prior))
+        z_pres_probs[:, 0] * (tf.log(z_pres_probs[:, 0] + 1e-10) - tf.log(z_pres_prior + 1e-10)) +
+        z_pres_probs[:, 1] * (tf.log(z_pres_probs[:, 1] + 1e-10) - tf.log(1.0 - z_pres_prior + 1e-10))
     )
 
     # updating finishing status
@@ -249,8 +249,8 @@ reconstruction = tf.maximum(tf.minimum(reconstruction, 1.0), 0.0)
 
 # adding reconstruction loss
 loss -= tf.reduce_sum(
-    images * tf.log(reconstruction + 10e-10) +
-    (1.0 - images) * tf.log(1.0 - reconstruction + 10e-10), 1
+    images * tf.log(reconstruction + 1e-10) +
+    (1.0 - images) * tf.log(1.0 - reconstruction + 1e-10), 1
 )
 
 # averaging the loss wrt. a batch

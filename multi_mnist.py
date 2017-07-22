@@ -146,7 +146,7 @@ if __name__ == "__main__":
         print("Writing {} digit images... ".format(num_digits), end="", flush=True)
         write_to_records(MULTI_MNIST_FOLDER + str(num_digits), strata_images, strata_indices,
                          strata_positions, strata_boxes, strata_labels, strata_digits)
-        print(num_digits, "done")
+        print("done")
 
         if num_digits == MAX_DIGITS_IN_COMMON:
             common_images, common_indices, common_positions, \
