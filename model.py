@@ -7,6 +7,7 @@ import tensorflow.contrib.layers as layers
 
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
+from matplotlib import gridspec
 
 from vae import vae
 from transformer import transformer
@@ -22,7 +23,7 @@ if not os.path.exists(RESULTS_FOLDER):
 
 EPOCHS = 1000
 BATCH_SIZE = 64
-LEARNING_RATE = 1e-4
+LEARNING_RATE = 1e-3
 
 CANVAS_SIZE = 50
 WINDOW_SIZE = 28
@@ -34,23 +35,23 @@ VAE_LATENT_DIMENSIONS = 50
 VAE_RECOGNITION_UNITS = [512, 256]
 VAE_GENERATIVE_UNITS = [256, 512]
 
-ANNEAL_EACH_ITERATIONS = 1000
+ANNEAL_EACH_ITERATIONS = 2000
 
-INIT_Z_PRES_PRIOR = 1e-5
+INIT_Z_PRES_PRIOR = 0.01
 MIN_Z_PRES_PRIOR = 1e-10
 Z_PRES_PRIOR_FACTOR = 0.5
 
-INIT_GUMBEL_TEMPERATURE = 1.0
-MIN_GUMBEL_TEMPERATURE = 1e-3
-GUMBEL_TEMPERATURE_FACTOR = 0.7
+INIT_GUMBEL_TEMPERATURE = 5.0
+MIN_GUMBEL_TEMPERATURE = 1e-5
+GUMBEL_TEMPERATURE_FACTOR = 0.5
 
-SAVE_IMAGES_EACH_ITERATIONS = 1000
-NUM_IMAGES_TO_SAVE = 20
+PLOT_IMAGES_EACH_ITERATIONS = 200
+NUMBER_OF_IMAGES_TO_PLOT = 24
 
 SCALE_PRIOR_MEAN = -0.5
 SCALE_PRIOR_VARIANCE = 0.01
 SHIFT_PRIOR_MEAN = 0.0
-SHIFT_PRIOR_VARIANCE = 1.0
+SHIFT_PRIOR_VARIANCE = 0.5
 VAE_PRIOR_MEAN = 0.0
 VAE_PRIOR_VARIANCE = 1.0
 VAE_LIKELIHOOD_STD = 0.3
@@ -101,6 +102,56 @@ def sample_from_mvn(mean, diag_variance):
     sample = mean + standard_normal * tf.sqrt(diag_variance)
 
     return sample
+
+
+def plot_digits(original, reconstructed, scales, shifts, digits, iteration):
+    num_images = min(NUMBER_OF_IMAGES_TO_PLOT, original.shape[0])
+
+    cols = int(np.sqrt(num_images * 2 / 12) * 4)
+    cols = cols if cols % 2 == 0 else cols + 1
+    rows = int(np.ceil(num_images * 2 / cols))
+    colors = ["r", "g", "b", "m", "w", "y"]
+
+    gs = gridspec.GridSpec(
+        rows, cols,
+        wspace=0.01, hspace=0.01,
+        width_ratios=[1]*cols, height_ratios=[1]*rows,
+        top=1.0-0.1/(rows+1), bottom=0.1/(rows+1),
+        left=0.1/(cols+1), right=1.0-0.1/(cols+1)
+    )
+
+    for i in range(rows):
+        for j in range(cols):
+            if i*cols + j < num_images*2:
+                ax = plt.subplot(gs[i, j])
+                img_idx = (i * cols + j) // 2
+
+                if j % 2 == 0:
+                    img = original[img_idx]
+                else:
+                    img = reconstructed[img_idx]
+
+                ax.imshow(
+                    np.reshape(img, [CANVAS_SIZE, CANVAS_SIZE]),
+                    cmap="gray", vmin=0.0, vmax=1.0
+                )
+
+                for d in range(digits[img_idx]):
+                    size = CANVAS_SIZE * scales[img_idx][d][0]
+                    left = ((CANVAS_SIZE - 1) * (1.0 + shifts[img_idx][d][0]) - size) / 2.0
+                    top = ((CANVAS_SIZE - 1) * (1.0 + shifts[img_idx][d][1]) - size) / 2.0
+
+                    ax.add_patch(patches.Rectangle(
+                        (left, top), size, size, linewidth=0.5,
+                        edgecolor=colors[d], facecolor='none'
+                    ))
+
+                ax.axis('off')
+
+    plt.savefig(
+        RESULTS_FOLDER + "{0}.png".format(iteration + 1), dpi=600
+    )
+    plt.clf()
 
 
 # fetching a batch of numbers of digits and images from a queue
@@ -279,7 +330,6 @@ with tf.Session(config=config) as sess:
     threads = tf.train.start_queue_runners(sess=sess, coord=coord)
 
     iteration = 0
-    colors = ["r", "g", "b"]
     temp = INIT_GUMBEL_TEMPERATURE
     prob = INIT_Z_PRES_PRIOR
 
@@ -296,8 +346,8 @@ with tf.Session(config=config) as sess:
 
             print("iteration {}\tloss {:.3f}\taccuracy {:.2f}".format(iteration, l, a))
 
-            # periodic evaluation
-            if (iteration+1) % SAVE_IMAGES_EACH_ITERATIONS == 0:
+            # periodic image saving
+            if (iteration+1) % PLOT_IMAGES_EACH_ITERATIONS == 0:
                 im, rec, sc, sh, dd = sess.run(
                     [images, reconstruction, scales, shifts, digits],
                     feed_dict={
@@ -306,37 +356,7 @@ with tf.Session(config=config) as sess:
                     }
                 )
 
-                for i in range(min(NUM_IMAGES_TO_SAVE, BATCH_SIZE)):
-                    # plotting the original image
-                    plt.axes().imshow(
-                        np.reshape(im[i], [CANVAS_SIZE, CANVAS_SIZE]),
-                        cmap="gray", vmin=0.0, vmax=1.0
-                    )
-
-                    # adding attention windows
-                    for d in range(dd[i]):
-                        size = CANVAS_SIZE * sc[i][d][0]
-                        left = ((CANVAS_SIZE - 1) * (1.0 + sh[i][d][0]) - size) / 2.0
-                        top = ((CANVAS_SIZE - 1) * (1.0 + sh[i][d][1]) - size) / 2.0
-
-                        plt.axes().add_patch(patches.Rectangle(
-                            (left, top), size, size, linewidth=1,
-                            edgecolor=colors[d], facecolor='none'
-                        ))
-
-                    # saving the original image + attention windows
-                    plt.savefig(RESULTS_FOLDER + "{0}_{1}_orig.png".format(iteration+1, i+1))
-                    plt.clf()
-
-                    # plotting the reconstructed image
-                    plt.axes().imshow(
-                        np.reshape(rec[i], [CANVAS_SIZE, CANVAS_SIZE]),
-                        cmap="gray", vmin=0.0, vmax=1.0
-                    )
-
-                    # saving the reconstructed image
-                    plt.savefig(RESULTS_FOLDER + "{0}_{1}_recon.png".format(iteration+1, i+1))
-                    plt.clf()
+                plot_digits(im, rec, sc, sh, dd, iteration)
 
             # periodic annealing
             if (iteration+1) % ANNEAL_EACH_ITERATIONS == 0:
