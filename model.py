@@ -23,7 +23,6 @@ if not os.path.exists(RESULTS_FOLDER):
 
 EPOCHS = 1000
 BATCH_SIZE = 64
-LEARNING_RATE = 1e-3
 
 CANVAS_SIZE = 50
 WINDOW_SIZE = 28
@@ -37,13 +36,13 @@ VAE_GENERATIVE_UNITS = [256, 512]
 
 ANNEAL_EACH_ITERATIONS = 1000
 
-INIT_Z_PRES_PRIOR = 0.001
-MIN_Z_PRES_PRIOR = 1e-9
-Z_PRES_PRIOR_FACTOR = 0.5
+INIT_Z_PRES_PRIOR = 0.8
+MIN_Z_PRES_PRIOR = 1e-5
+Z_PRES_PRIOR_FACTOR = 0.893
 
-INIT_GUMBEL_TEMPERATURE = 1.0
-MIN_GUMBEL_TEMPERATURE = 1e-5
-GUMBEL_TEMPERATURE_FACTOR = 0.5
+INIT_GUMBEL_TEMPERATURE = 10.0
+MIN_GUMBEL_TEMPERATURE = 1e-2
+GUMBEL_TEMPERATURE_FACTOR = 0.8
 
 PLOT_IMAGES_EACH_ITERATIONS = 200
 NUMBER_OF_IMAGES_TO_PLOT = 24
@@ -63,9 +62,10 @@ VAE_PRIOR_LOG_VARIANCE = tf.log(VAE_PRIOR_VARIANCE)
 CLIP_GRADIENTS = True
 GRADIENT_CLIPPING_NORM = 10.0
 
+LEARNING_RATE = 1e-3
 LEARNING_RATE_DECAY = True
 LEARNING_RATE_DECAY_RATE = 0.8
-LEARNING_RATE_DECAY_STEPS = 2000
+LEARNING_RATE_DECAY_STEPS = 1000
 LEARNING_RATE_MINIMUM = 1e-5
 
 
@@ -237,10 +237,15 @@ def body(step, not_finished, prev_state, inputs,
         theta_recon, [CANVAS_SIZE, CANVAS_SIZE]
     ))
 
-    # sampling z_pres flag (1 - more digits, 0 - no more digits)
+    # z_pres unnormalized logits and 2-class softmax probabilities
     z_pres_logits = layers.fully_connected(outputs, 2, activation_fn=None)
-    z_pres = gumbel_softmax(z_pres_logits, gumbel_temperature, hard=True)[:, 0]
     z_pres_prob = tf.nn.softmax(z_pres_logits)[:, 0]
+
+    # sampling z_pres flag (1 - more digits, 0 - no more digits)
+    z_pres = tf.where(
+        tf.greater(gumbel_softmax(z_pres_logits, gumbel_temperature)[:, 0], 0.5),
+        tf.ones_like(z_pres_logits[:, 0]), tf.zeros_like(z_pres_logits[:, 0])
+    )
 
     # z_pres KL-divergence:
     # previous value of not_finished is used
