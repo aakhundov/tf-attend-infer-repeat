@@ -23,7 +23,7 @@ if not os.path.exists(RESULTS_FOLDER):
 
 EPOCHS = 1000
 BATCH_SIZE = 64
-LEARNING_RATE = 1e-3
+LEARNING_RATE = 1e-4
 
 CANVAS_SIZE = 50
 WINDOW_SIZE = 28
@@ -37,21 +37,21 @@ VAE_GENERATIVE_UNITS = [256, 512]
 
 ANNEAL_EACH_ITERATIONS = 2000
 
-INIT_Z_PRES_PRIOR = 0.01
+INIT_Z_PRES_PRIOR = 0.1
 MIN_Z_PRES_PRIOR = 1e-10
 Z_PRES_PRIOR_FACTOR = 0.5
 
-INIT_GUMBEL_TEMPERATURE = 5.0
+INIT_GUMBEL_TEMPERATURE = 1.0
 MIN_GUMBEL_TEMPERATURE = 1e-5
 GUMBEL_TEMPERATURE_FACTOR = 0.5
 
 PLOT_IMAGES_EACH_ITERATIONS = 200
 NUMBER_OF_IMAGES_TO_PLOT = 24
 
-SCALE_PRIOR_MEAN = -0.5
-SCALE_PRIOR_VARIANCE = 0.01
+SCALE_PRIOR_MEAN = 0.0
+SCALE_PRIOR_VARIANCE = 1.0
 SHIFT_PRIOR_MEAN = 0.0
-SHIFT_PRIOR_VARIANCE = 0.5
+SHIFT_PRIOR_VARIANCE = 1.0
 VAE_PRIOR_MEAN = 0.0
 VAE_PRIOR_VARIANCE = 1.0
 VAE_LIKELIHOOD_STD = 0.3
@@ -59,6 +59,9 @@ VAE_LIKELIHOOD_STD = 0.3
 SHIFT_PRIOR_LOG_VARIANCE = tf.log(SHIFT_PRIOR_VARIANCE)
 SCALE_PRIOR_LOG_VARIANCE = tf.log(SCALE_PRIOR_VARIANCE)
 VAE_PRIOR_LOG_VARIANCE = tf.log(VAE_PRIOR_VARIANCE)
+
+CLIP_GRADIENTS = True
+GRADIENT_CLIPPING_NORM = 10.0
 
 
 def read_and_decode(fqueue, batch_size, canvas_size):
@@ -232,14 +235,14 @@ def body(step, not_finished, prev_state, inputs,
     # sampling z_pres flag (1 - more digits, 0 - no more digits)
     z_pres_logits = layers.fully_connected(outputs, 2, activation_fn=None)
     z_pres = gumbel_softmax(z_pres_logits, gumbel_temperature, hard=True)[:, 0]
-    z_pres_probs = tf.nn.softmax(z_pres_logits)
+    z_pres_prob = tf.nn.softmax(z_pres_logits)[:, 0]
 
     # z_pres KL-divergence:
     # previous value of not_finished is used
     # to account for KL of first z_pres=0
     running_loss += not_finished * (
-        z_pres_probs[:, 0] * (tf.log(z_pres_probs[:, 0] + 1e-10) - tf.log(z_pres_prior + 1e-10)) +
-        z_pres_probs[:, 1] * (tf.log(z_pres_probs[:, 1] + 1e-10) - tf.log(1.0 - z_pres_prior + 1e-10))
+        z_pres_prob * (tf.log(z_pres_prob + 1e-10) - tf.log(z_pres_prior + 1e-10)) +
+        (1.0 - z_pres_prob) * (tf.log(1.0 - z_pres_prob + 1e-10) - tf.log(1.0 - z_pres_prior + 1e-10))
     )
 
     # updating finishing status
@@ -315,7 +318,14 @@ accuracy = tf.reduce_mean(tf.cast(
     tf.float32
 ))
 
-train = tf.train.AdamOptimizer(LEARNING_RATE).minimize(loss)
+optimizer = tf.train.AdamOptimizer(LEARNING_RATE)
+grads, variables = zip(*optimizer.compute_gradients(loss))
+
+if CLIP_GRADIENTS:
+    grads = tf.clip_by_global_norm(grads, GRADIENT_CLIPPING_NORM)[0]
+
+grads_and_vars = list(zip(grads, variables))
+train = optimizer.apply_gradients(grads_and_vars)
 
 
 config = tf.ConfigProto()
