@@ -23,7 +23,7 @@ if not os.path.exists(RESULTS_FOLDER):
 
 EPOCHS = 1000
 BATCH_SIZE = 64
-LEARNING_RATE = 1e-4
+LEARNING_RATE = 1e-3
 
 CANVAS_SIZE = 50
 WINDOW_SIZE = 28
@@ -35,10 +35,10 @@ VAE_LATENT_DIMENSIONS = 50
 VAE_RECOGNITION_UNITS = [512, 256]
 VAE_GENERATIVE_UNITS = [256, 512]
 
-ANNEAL_EACH_ITERATIONS = 2000
+ANNEAL_EACH_ITERATIONS = 1000
 
-INIT_Z_PRES_PRIOR = 0.1
-MIN_Z_PRES_PRIOR = 1e-10
+INIT_Z_PRES_PRIOR = 0.001
+MIN_Z_PRES_PRIOR = 1e-9
 Z_PRES_PRIOR_FACTOR = 0.5
 
 INIT_GUMBEL_TEMPERATURE = 1.0
@@ -48,8 +48,8 @@ GUMBEL_TEMPERATURE_FACTOR = 0.5
 PLOT_IMAGES_EACH_ITERATIONS = 200
 NUMBER_OF_IMAGES_TO_PLOT = 24
 
-SCALE_PRIOR_MEAN = 0.0
-SCALE_PRIOR_VARIANCE = 1.0
+SCALE_PRIOR_MEAN = -1.0
+SCALE_PRIOR_VARIANCE = 0.1
 SHIFT_PRIOR_MEAN = 0.0
 SHIFT_PRIOR_VARIANCE = 1.0
 VAE_PRIOR_MEAN = 0.0
@@ -62,6 +62,11 @@ VAE_PRIOR_LOG_VARIANCE = tf.log(VAE_PRIOR_VARIANCE)
 
 CLIP_GRADIENTS = True
 GRADIENT_CLIPPING_NORM = 10.0
+
+LEARNING_RATE_DECAY = True
+LEARNING_RATE_DECAY_RATE = 0.8
+LEARNING_RATE_DECAY_STEPS = 2000
+LEARNING_RATE_MINIMUM = 1e-5
 
 
 def read_and_decode(fqueue, batch_size, canvas_size):
@@ -152,7 +157,7 @@ def plot_digits(original, reconstructed, scales, shifts, digits, iteration):
                 ax.axis('off')
 
     plt.savefig(
-        RESULTS_FOLDER + "{0}.png".format(iteration + 1), dpi=600
+        RESULTS_FOLDER + "{0}.png".format(iteration), dpi=600
     )
     plt.clf()
 
@@ -318,14 +323,31 @@ accuracy = tf.reduce_mean(tf.cast(
     tf.float32
 ))
 
-optimizer = tf.train.AdamOptimizer(LEARNING_RATE)
+
+# training tools
+
+global_step = tf.Variable(0, trainable=False)
+
+if LEARNING_RATE_DECAY:
+    learning_rate = tf.maximum(tf.train.exponential_decay(
+        LEARNING_RATE, global_step,
+        LEARNING_RATE_DECAY_STEPS,
+        LEARNING_RATE_DECAY_RATE,
+        staircase=True
+    ), LEARNING_RATE_MINIMUM)
+else:
+    learning_rate = LEARNING_RATE
+
+optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate)
 grads, variables = zip(*optimizer.compute_gradients(loss))
 
 if CLIP_GRADIENTS:
     grads = tf.clip_by_global_norm(grads, GRADIENT_CLIPPING_NORM)[0]
 
 grads_and_vars = list(zip(grads, variables))
-train = optimizer.apply_gradients(grads_and_vars)
+train = optimizer.apply_gradients(
+    grads_and_vars, global_step=global_step
+)
 
 
 config = tf.ConfigProto()
@@ -339,15 +361,14 @@ with tf.Session(config=config) as sess:
 
     threads = tf.train.start_queue_runners(sess=sess, coord=coord)
 
-    iteration = 0
     temp = INIT_GUMBEL_TEMPERATURE
     prob = INIT_Z_PRES_PRIOR
 
     try:
         while True:
             # training
-            _, l, a = sess.run(
-                [train, loss, accuracy],
+            _, l, a, iteration = sess.run(
+                [train, loss, accuracy, global_step],
                 feed_dict={
                     gumbel_temperature: temp,
                     z_pres_prior: prob
@@ -357,7 +378,7 @@ with tf.Session(config=config) as sess:
             print("iteration {}\tloss {:.3f}\taccuracy {:.2f}".format(iteration, l, a))
 
             # periodic image saving
-            if (iteration+1) % PLOT_IMAGES_EACH_ITERATIONS == 0:
+            if iteration % PLOT_IMAGES_EACH_ITERATIONS == 0:
                 im, rec, sc, sh, dd = sess.run(
                     [images, reconstruction, scales, shifts, digits],
                     feed_dict={
@@ -369,7 +390,7 @@ with tf.Session(config=config) as sess:
                 plot_digits(im, rec, sc, sh, dd, iteration)
 
             # periodic annealing
-            if (iteration+1) % ANNEAL_EACH_ITERATIONS == 0:
+            if iteration % ANNEAL_EACH_ITERATIONS == 0:
                 # annealing Gumbel-Softmax temperature
                 temp = max(MIN_GUMBEL_TEMPERATURE, temp * GUMBEL_TEMPERATURE_FACTOR)
                 # annealing z_pres prior probability
@@ -379,8 +400,6 @@ with tf.Session(config=config) as sess:
                 print("hyperparameters annealed")
                 print("temp: {}, prob: {}".format(temp, prob))
                 print()
-
-            iteration += 1
 
     except tf.errors.OutOfRangeError:
         print()
