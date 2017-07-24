@@ -37,11 +37,11 @@ VAE_GENERATIVE_UNITS = [256, 512]
 ANNEAL_EACH_ITERATIONS = 1000
 
 INIT_Z_PRES_PRIOR = 0.8
-MIN_Z_PRES_PRIOR = 1e-5
-Z_PRES_PRIOR_FACTOR = 0.893
+MIN_Z_PRES_PRIOR = 0.1
+Z_PRES_PRIOR_FACTOR = 0.95
 
 INIT_GUMBEL_TEMPERATURE = 10.0
-MIN_GUMBEL_TEMPERATURE = 1e-2
+MIN_GUMBEL_TEMPERATURE = 0.1
 GUMBEL_TEMPERATURE_FACTOR = 0.8
 
 PLOT_IMAGES_EACH_ITERATIONS = 200
@@ -65,8 +65,8 @@ GRADIENT_CLIPPING_NORM = 10.0
 LEARNING_RATE = 1e-3
 LEARNING_RATE_DECAY = True
 LEARNING_RATE_DECAY_RATE = 0.8
-LEARNING_RATE_DECAY_STEPS = 1000
-LEARNING_RATE_MINIMUM = 1e-5
+LEARNING_RATE_DECAY_STEPS = 2000
+LEARNING_RATE_MINIMUM = 1e-4
 
 
 def read_and_decode(fqueue, batch_size, canvas_size):
@@ -179,7 +179,7 @@ z_pres_prior = tf.placeholder(tf.float32, shape=[])
 def cond(step, not_finished, *_):
     return tf.logical_and(
         tf.less(step, MAX_DIGITS),
-        tf.greater(tf.reduce_max(not_finished), 0.0)
+        tf.reduce_any(not_finished)
     )
 
 
@@ -250,43 +250,54 @@ def body(step, not_finished, prev_state, inputs,
     # z_pres KL-divergence:
     # previous value of not_finished is used
     # to account for KL of first z_pres=0
-    running_loss += not_finished * (
+    running_loss += tf.where(
+        not_finished,
         z_pres_prob * (tf.log(z_pres_prob + 10e-10) - tf.log(z_pres_prior + 10e-10)) +
-        (1.0 - z_pres_prob) * (tf.log(1.0 - z_pres_prob + 10e-10) - tf.log(1.0 - z_pres_prior + 10e-10))
+        (1.0 - z_pres_prob) * (tf.log(1.0 - z_pres_prob + 10e-10) - tf.log(1.0 - z_pres_prior + 10e-10)),
+        tf.zeros_like(running_loss)
     )
 
-    # updating finishing status
-    not_finished *= z_pres
+    # updating finishing status by the latest z_pres value
+    not_finished = tf.logical_and(not_finished, tf.equal(z_pres, 1.0))
 
     # number of digits per batch item
     running_digits += tf.cast(not_finished, tf.int32)
 
     # adding reconstructed window to the running canvas
-    running_recon += tf.expand_dims(not_finished, 1) * \
-        tf.reshape(window_recon, [-1, CANVAS_SIZE * CANVAS_SIZE])
+    running_recon += tf.where(
+        not_finished,
+        tf.reshape(window_recon, [-1, CANVAS_SIZE * CANVAS_SIZE]),
+        tf.zeros_like(running_recon)
+    )
 
     # shift KL-divergence
-    running_loss += not_finished * (
+    running_loss += tf.where(
+        not_finished,
         0.5 * tf.reduce_sum(
             SHIFT_PRIOR_LOG_VARIANCE - shift_log_variance - 1.0 + shift_variance / SHIFT_PRIOR_VARIANCE +
             tf.square(shift_mean - SHIFT_PRIOR_MEAN) / SHIFT_PRIOR_VARIANCE, 1
-        )
+        ),
+        tf.zeros_like(running_loss)
     )
 
     # scale KL-divergence
-    running_loss += not_finished * (
+    running_loss += tf.where(
+        not_finished,
         0.5 * tf.reduce_sum(
             SCALE_PRIOR_LOG_VARIANCE - scale_log_variance - 1.0 + scale_variance / SCALE_PRIOR_VARIANCE +
             tf.square(scale_mean - SCALE_PRIOR_MEAN) / SCALE_PRIOR_VARIANCE, 1
-        )
+        ),
+        tf.zeros_like(running_loss)
     )
 
     # VAE KL_DIVERGENCE
-    running_loss += not_finished * (
+    running_loss += tf.where(
+        not_finished,
         0.5 * tf.reduce_sum(
             VAE_PRIOR_LOG_VARIANCE - vae_log_variance - 1.0 + tf.exp(vae_log_variance) / VAE_PRIOR_VARIANCE +
             tf.square(vae_mean - VAE_PRIOR_MEAN) / VAE_PRIOR_VARIANCE, 1
-        )
+        ),
+        tf.zeros_like(running_loss)
     )
 
     return step+1, not_finished, next_state, inputs, \
@@ -297,7 +308,7 @@ def body(step, not_finished, prev_state, inputs,
 # RNN while_loop with variable number of steps for each batch item
 _, _, _, _, reconstruction, loss, digits, scales, shifts = tf.while_loop(
     cond, body, [
-        tf.constant(0), tf.fill([BATCH_SIZE], 1.0),
+        tf.constant(0), tf.fill([BATCH_SIZE], True),
         rnn_init_state, images, tf.zeros_like(images),
         tf.zeros([BATCH_SIZE]), tf.zeros([BATCH_SIZE], dtype=tf.int32),
         tf.TensorArray(dtype=tf.float32, size=0, dynamic_size=True),
