@@ -251,7 +251,11 @@ def body(step, not_finished, prev_state, inputs,
     )
 
     # updating finishing status
-    not_finished *= z_pres
+    not_finished = tf.where(
+        tf.equal(not_finished, 1.0),
+        z_pres * tf.stop_gradient(not_finished),
+        tf.zeros_like(not_finished)
+    )
 
     # number of digits per batch item
     running_digits += tf.cast(not_finished, tf.int32)
