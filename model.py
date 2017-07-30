@@ -14,7 +14,7 @@ from transformer import transformer
 from gumbel import gumbel_softmax
 
 
-RESULTS_FOLDER = "air_results/"
+RESULTS_FOLDER = "air_results_10_0.8_0.1_15/"
 DATA_FILE = "multi_mnist_data/common.tfrecords"
 
 if not os.path.exists(RESULTS_FOLDER):
@@ -100,6 +100,7 @@ def read_and_decode(fqueue, batch_size, canvas_size):
         batch_size=batch_size,
         capacity=10000+batch_size*10,
         min_after_dequeue=10000,
+        num_threads=4
     )
 
     return batch
