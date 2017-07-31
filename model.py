@@ -14,7 +14,7 @@ from transformer import transformer
 from gumbel import gumbel_softmax
 
 
-RESULTS_FOLDER = "air_results_10_0.8_0.1_15/"
+RESULTS_FOLDER = "air_results/"
 DATA_FILE = "multi_mnist_data/common.tfrecords"
 
 if not os.path.exists(RESULTS_FOLDER):
