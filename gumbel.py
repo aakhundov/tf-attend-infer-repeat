@@ -1,7 +1,7 @@
 import tensorflow as tf
 
 
-def sample_gumbel(shape, eps=1e-20):
+def sample_gumbel(shape, eps=10e-10):
     """Sample from Gumbel(0, 1)"""
     U = tf.random_uniform(shape, minval=0, maxval=1)
     return -tf.log(-tf.log(U + eps) + eps)
@@ -26,8 +26,24 @@ def gumbel_softmax(logits, temperature, hard=False):
     """
     y = gumbel_softmax_sample(logits, temperature)
     if hard:
-        k = tf.shape(logits)[-1]
-        # y_hard = tf.cast(tf.one_hot(tf.argmax(y,1),k), y.dtype)
         y_hard = tf.cast(tf.equal(y, tf.reduce_max(y, 1, keep_dims=True)), y.dtype)
+        y = tf.stop_gradient(y_hard - y) + y
+    return y
+
+
+def sample_logistic(count, eps=10e-10):
+    U = tf.random_uniform([count], minval=0, maxval=1)
+    return tf.log(U + eps) - tf.log(1.0 - U + eps)
+
+
+def gumbel_softmax_sample_binary(log_odds, temperature):
+    y = log_odds + sample_logistic(tf.shape(log_odds)[0])
+    return tf.nn.sigmoid(y / temperature)
+
+
+def gumbel_softmax_binary(log_odds, temperature, hard=False):
+    y = gumbel_softmax_sample_binary(log_odds, temperature)
+    if hard:
+        y_hard = tf.round(y)
         y = tf.stop_gradient(y_hard - y) + y
     return y

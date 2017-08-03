@@ -11,7 +11,7 @@ from matplotlib import gridspec
 
 from vae import vae
 from transformer import transformer
-from gumbel import gumbel_softmax
+from gumbel import gumbel_softmax_binary
 
 
 RESULTS_FOLDER = "air_results/"
@@ -239,9 +239,9 @@ def body(step, not_finished, prev_state, inputs,
     ))
 
     # sampling z_pres flag (1 - more digits, 0 - no more digits)
-    z_pres_logits = layers.fully_connected(outputs, 2, activation_fn=None)
-    z_pres = gumbel_softmax(z_pres_logits, gumbel_temperature, hard=True)[:, 0]
-    z_pres_prob = tf.nn.softmax(z_pres_logits)[:, 0]
+    z_pres_log_odds = tf.squeeze(layers.fully_connected(outputs, 1, activation_fn=None))
+    z_pres = gumbel_softmax_binary(z_pres_log_odds, gumbel_temperature, hard=True)
+    z_pres_prob = tf.exp(z_pres_log_odds) / (1.0 + tf.exp(z_pres_log_odds))
 
     # z_pres KL-divergence:
     # previous value of not_finished is used
