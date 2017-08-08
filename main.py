@@ -11,35 +11,45 @@ from air_model import AIRModel
 RESULTS_FOLDER = "air_results/"
 IMAGES_FOLDER = RESULTS_FOLDER + "images/"
 MODELS_FOLDER = RESULTS_FOLDER + "models/"
+SUMMARIES_FOLDER = RESULTS_FOLDER + "summary/"
+SOURCE_FOLDER = RESULTS_FOLDER + "source/"
 DATA_FILE = "multi_mnist_data/common.tfrecords"
 
+# removing results folder (with content) if exists
 shutil.rmtree(RESULTS_FOLDER, ignore_errors=True)
 
+# creating result directories
 os.makedirs(RESULTS_FOLDER)
 os.makedirs(IMAGES_FOLDER)
 os.makedirs(MODELS_FOLDER)
+os.makedirs(SUMMARIES_FOLDER)
+os.makedirs(SOURCE_FOLDER)
+
+# creating a copy of the current version of .py sources
+for file in [f for f in os.listdir(".") if f.endswith(".py")]:
+        shutil.copy(file, SOURCE_FOLDER + file)
 
 
-EPOCHS = 1000
+EPOCHS = 300
 BATCH_SIZE = 64
 NUM_THREADS = 4
-
 CANVAS_SIZE = 50
 
-SAVE_MODEL_EACH_ITERATIONS = 1000
+NUM_SUMMARIES_EACH_ITERATIONS = 10
+SAVE_MODEL_EACH_ITERATIONS = 10000
 PLOT_IMAGES_EACH_ITERATIONS = 200
 NUMBER_OF_IMAGES_TO_PLOT = 24
 
 
 # fetching a batch of numbers of digits and images from a queue
-filename_queue = tf.train.string_input_producer([DATA_FILE], num_epochs=EPOCHS)
-num_digits, images = read_and_decode(filename_queue, BATCH_SIZE, CANVAS_SIZE, NUM_THREADS)
+with tf.name_scope("pipeline"):
+    filename_queue = tf.train.string_input_producer([DATA_FILE], num_epochs=EPOCHS)
+    num_digits, images = read_and_decode(filename_queue, BATCH_SIZE, CANVAS_SIZE, NUM_THREADS)
 
 # AIR model
 model = AIRModel(
     images, num_digits,
-    max_digits=3, lstm_units=256,
-    canvas_size=CANVAS_SIZE, windows_size=28,
+    max_steps=3, max_digits=2, lstm_units=256, canvas_size=CANVAS_SIZE, windows_size=28,
     vae_latent_dimensions=50, vae_recognition_units=(512, 256), vae_generative_units=(256, 512),
     scale_prior_mean=-1.0, scale_prior_variance=0.1, shift_prior_mean=0.0, shift_prior_variance=1.0,
     vae_prior_mean=0.0, vae_prior_variance=1.0, vae_likelihood_std=0.3,
@@ -52,7 +62,6 @@ model = AIRModel(
 )
 
 
-saver = tf.train.Saver()
 config = tf.ConfigProto()
 config.gpu_options.allow_growth = True
 
@@ -63,16 +72,25 @@ with tf.Session(config=config) as sess:
     sess.run(tf.global_variables_initializer())
 
     threads = tf.train.start_queue_runners(sess=sess, coord=coord)
+    writer = tf.summary.FileWriter(SUMMARIES_FOLDER, sess.graph)
+    saver = tf.train.Saver(max_to_keep=10000)
+
+    num_summaries = tf.summary.merge_all("num.summaries")
 
     try:
         while True:
             # training
-            _, l, a, step = sess.run([
+            _, l, a, step, ns = sess.run([
                 model.training, model.loss,
-                model.accuracy, model.global_step
+                model.accuracy, model.global_step,
+                num_summaries
             ])
 
             print("iteration {}\tloss {:.3f}\taccuracy {:.2f}".format(step, l, a))
+
+            # saving numeric summaries
+            if step % NUM_SUMMARIES_EACH_ITERATIONS == 0:
+                writer.add_summary(ns, step)
 
             # periodic image plotting
             if step % PLOT_IMAGES_EACH_ITERATIONS == 0:
@@ -88,11 +106,11 @@ with tf.Session(config=config) as sess:
                     IMAGES_FOLDER
                 )
 
-            # periodic model saving
+            # saving model checkpoints
             if step % SAVE_MODEL_EACH_ITERATIONS == 0:
                 saver.save(
                     sess, MODELS_FOLDER + "air-model",
-                    global_step=model.global_step
+                    global_step=step
                 )
 
     except tf.errors.OutOfRangeError:
