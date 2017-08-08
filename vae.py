@@ -2,7 +2,8 @@ import tensorflow as tf
 import tensorflow.contrib.layers as layers
 
 
-def vae(inputs, input_dim, rec_hidden_units, latent_dim, gen_hidden_units, likelihood_std=0.0, activation=tf.nn.softplus):
+def vae(inputs, input_dim, rec_hidden_units, latent_dim,
+        gen_hidden_units, likelihood_std=0.0, activation=tf.nn.softplus):
 
     input_size = tf.shape(inputs)[0]
 
