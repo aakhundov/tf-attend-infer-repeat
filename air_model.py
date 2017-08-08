@@ -10,7 +10,7 @@ from gumbel import gumbel_softmax_binary
 class AIRModel:
 
     def __init__(self, input_images, target_num_digits,
-                 max_digits=3, lstm_units=256, canvas_size=50, windows_size=28,
+                 max_steps=3, max_digits=2, lstm_units=256, canvas_size=50, windows_size=28,
                  vae_latent_dimensions=50, vae_recognition_units=(512, 256), vae_generative_units=(256, 512),
                  scale_prior_mean=-1.0, scale_prior_variance=0.1, shift_prior_mean=0.0, shift_prior_variance=1.0,
                  vae_prior_mean=0.0, vae_prior_variance=1.0, vae_likelihood_std=0.3,
@@ -22,6 +22,7 @@ class AIRModel:
         self.target_num_digits = target_num_digits
         self.batch_size = tf.shape(input_images)[0]
 
+        self.max_steps = max_steps
         self.max_digits = max_digits
         self.lstm_units = lstm_units
         self.canvas_size = canvas_size
@@ -33,13 +34,10 @@ class AIRModel:
 
         self.scale_prior_mean = scale_prior_mean
         self.scale_prior_variance = scale_prior_variance
-        self.scale_prior_log_variance = tf.log(scale_prior_variance)
         self.shift_prior_mean = shift_prior_mean
         self.shift_prior_variance = shift_prior_variance
-        self.shift_prior_log_variance = tf.log(shift_prior_variance)
         self.vae_prior_mean = vae_prior_mean
         self.vae_prior_variance = vae_prior_variance
-        self.vae_prior_log_variance = tf.log(vae_prior_variance)
         self.vae_likelihood_std = vae_likelihood_std
 
         self.z_pres_prior = z_pres_prior
@@ -49,6 +47,10 @@ class AIRModel:
 
         with tf.name_scope("air"):
             self.global_step = tf.Variable(0, trainable=False, name="global_step")
+
+            self.scale_prior_log_variance = tf.log(scale_prior_variance, name="scale_prior_log_variance")
+            self.shift_prior_log_variance = tf.log(shift_prior_variance, name="shift_prior_log_variance")
+            self.vae_prior_log_variance = tf.log(vae_prior_variance, name="vae_prior_log_variance")
 
             if annealing_schedules is not None:
                 for param, schedule in annealing_schedules.items():
@@ -83,18 +85,57 @@ class AIRModel:
         standard_normal = tf.random_normal(tf.shape(mean))
         return mean + standard_normal * tf.sqrt(diag_variance)
 
+    def _summary_by_digit_count(self, tensor, digits, name):
+        float_tensor = tf.cast(tensor, tf.float32)
+
+        for i in range(self.max_digits+1):
+            tf.summary.scalar(
+                name + "_" + str(i) + "_dig",
+                tf.reduce_mean(tf.boolean_mask(
+                    float_tensor, tf.equal(digits, i)
+                )), ["num.summaries"]
+            )
+
+        tf.summary.scalar(
+            name + "_all_dig",
+            tf.reduce_mean(float_tensor),
+            ["num.summaries"]
+        )
+
+    def _summary_by_step_and_digit_count(self, tensor, steps, name):
+        for i in range(self.max_steps):
+            mask = tf.greater(steps, i)
+            self._summary_by_digit_count(
+                tf.boolean_mask(tensor[:, i], mask),
+                tf.boolean_mask(self.target_num_digits, mask),
+                name + "_" + str(i+1) + "_step"
+            )
+
+        mask = tf.greater(steps, 0)
+        masked_sum = tf.reduce_sum(
+            tensor * tf.cast(tf.sequence_mask(steps, self.max_steps), tensor.dtype),
+            axis=1
+        )
+
+        self._summary_by_digit_count(
+            tf.boolean_mask(masked_sum / tf.cast(steps, tensor.dtype), mask),
+            tf.boolean_mask(self.target_num_digits, mask),
+            name + "_avg_step"
+        )
+
     def _create_model(self):
         # condition of tf.while_loop
         def cond(step, not_finished, *_):
             return tf.logical_and(
-                tf.less(step, self.max_digits),
+                tf.less(step, self.max_steps),
                 tf.greater(tf.reduce_max(not_finished), 0.0)
             )
 
         # body of tf.while_loop
         def body(step, not_finished, prev_state, inputs,
                  running_recon, running_loss, running_digits,
-                 scales_ta, shifts_ta):
+                 scales_ta, shifts_ta, z_pres_probs_ta,
+                 z_pres_kls_ta, scale_kls_ta, shift_kls_ta, vae_kls_ta):
 
             with tf.name_scope("lstm") as scope:
                 # RNN time step
@@ -163,12 +204,13 @@ class AIRModel:
                 with tf.name_scope("gumbel"):
                     z_pres = gumbel_softmax_binary(z_pres_log_odds, self.gumbel_temperature, hard=True)
                     z_pres_prob = tf.exp(z_pres_log_odds) / (1.0 + tf.exp(z_pres_log_odds))
+                    z_pres_probs_ta = z_pres_probs_ta.write(z_pres_probs_ta.size(), z_pres_prob)
 
             with tf.name_scope("loss/z_pres_kl"):
                 # z_pres KL-divergence:
                 # previous value of not_finished is used
                 # to account for KL of first z_pres=0
-                running_loss += not_finished * (
+                z_pres_kl = not_finished * (
                     z_pres_prob * (
                         tf.log(z_pres_prob + 10e-10) -
                         tf.log(self.z_pres_prior + 10e-10)
@@ -178,6 +220,8 @@ class AIRModel:
                         tf.log(1.0 - self.z_pres_prior + 10e-10)
                     )
                 )
+                z_pres_kls_ta = z_pres_kls_ta.write(z_pres_kls_ta.size(), z_pres_kl)
+                running_loss += z_pres_kl
 
             # updating finishing status
             not_finished = tf.where(
@@ -186,7 +230,7 @@ class AIRModel:
                 tf.zeros_like(not_finished)
             )
 
-            # number of digits per batch item
+            # running inferred number of digits per batch item
             running_digits += tf.cast(not_finished, tf.int32)
 
             with tf.name_scope("canvas"):
@@ -194,39 +238,46 @@ class AIRModel:
                 running_recon += tf.expand_dims(not_finished, 1) * \
                     tf.reshape(window_recon, [-1, self.canvas_size * self.canvas_size])
 
-            with tf.name_scope("loss/shift_kl"):
-                # shift KL-divergence
-                running_loss += not_finished * (
-                    0.5 * tf.reduce_sum(
-                        self.shift_prior_log_variance - shift_log_variance -
-                        1.0 + shift_variance / self.scale_prior_variance +
-                        tf.square(shift_mean - self.shift_prior_mean) / self.scale_prior_variance, 1
-                    )
-                )
-
             with tf.name_scope("loss/scale_kl"):
                 # scale KL-divergence
-                running_loss += not_finished * (
+                scale_kl = not_finished * (
                     0.5 * tf.reduce_sum(
                         self.scale_prior_log_variance - scale_log_variance -
                         1.0 + scale_variance / self.scale_prior_variance +
                         tf.square(scale_mean - self.scale_prior_mean) / self.scale_prior_variance, 1
                     )
                 )
+                scale_kls_ta = scale_kls_ta.write(scale_kls_ta.size(), scale_kl)
+                running_loss += scale_kl
+
+            with tf.name_scope("loss/shift_kl"):
+                # shift KL-divergence
+                shift_kl = not_finished * (
+                    0.5 * tf.reduce_sum(
+                        self.shift_prior_log_variance - shift_log_variance -
+                        1.0 + shift_variance / self.scale_prior_variance +
+                        tf.square(shift_mean - self.shift_prior_mean) / self.scale_prior_variance, 1
+                    )
+                )
+                shift_kls_ta = shift_kls_ta.write(shift_kls_ta.size(), shift_kl)
+                running_loss += shift_kl
 
             with tf.name_scope("loss/VAE_kl"):
                 # VAE KL_DIVERGENCE
-                running_loss += not_finished * (
+                vae_kl = not_finished * (
                     0.5 * tf.reduce_sum(
                         self.vae_prior_log_variance - vae_log_variance -
                         1.0 + tf.exp(vae_log_variance) / self.vae_prior_variance +
                         tf.square(vae_mean - self.vae_prior_mean) / self.vae_prior_variance, 1
                     )
                 )
+                vae_kls_ta = vae_kls_ta.write(vae_kls_ta.size(), vae_kl)
+                running_loss += vae_kl
 
             return step + 1, not_finished, next_state, inputs, \
                 running_recon, running_loss, running_digits, \
-                scales_ta, shifts_ta
+                scales_ta, shifts_ta, z_pres_probs_ta, \
+                z_pres_kls_ta, scale_kls_ta, shift_kls_ta, vae_kls_ta
 
         with tf.name_scope("rnn"):
             # creating RNN cells and initial state
@@ -236,38 +287,63 @@ class AIRModel:
             )
 
             # RNN while_loop with variable number of steps for each batch item
-            _, _, _, _, reconstruction, loss, digits, scales, shifts = tf.while_loop(
-                cond, body, [
-                    tf.constant(0),                                 # RNN time step, initially zero
-                    tf.fill([self.batch_size], 1.0),                # "not_finished" tensor, 1 - not finished
-                    rnn_init_state,                                 # initial RNN state
-                    self.input_images,                              # original images go to each RNN step
-                    tf.zeros_like(self.input_images),               # reconstruction canvas, initially empty
-                    tf.zeros([self.batch_size]),                    # running value of the loss function
-                    tf.zeros([self.batch_size], dtype=tf.int32),    # running number of inferred digits
-                    tf.TensorArray(dtype=tf.float32, size=0, dynamic_size=True),   # inferred scales
-                    tf.TensorArray(dtype=tf.float32, size=0, dynamic_size=True)    # inferred shifts
-                ]
-            )
+            _, _, _, _, reconstruction, loss, self.rec_num_digits, scales, shifts, \
+                z_pres_probs, z_pres_kls, scale_kls, shift_kls, vae_kls = tf.while_loop(
+                    cond, body, [
+                        tf.constant(0),                                 # RNN time step, initially zero
+                        tf.fill([self.batch_size], 1.0),                # "not_finished" tensor, 1 - not finished
+                        rnn_init_state,                                 # initial RNN state
+                        self.input_images,                              # original images go to each RNN step
+                        tf.zeros_like(self.input_images),               # reconstruction canvas, initially empty
+                        tf.zeros([self.batch_size]),                    # running value of the loss function
+                        tf.zeros([self.batch_size], dtype=tf.int32),    # running inferred number of digits
+                        tf.TensorArray(dtype=tf.float32, size=0, dynamic_size=True),   # inferred scales
+                        tf.TensorArray(dtype=tf.float32, size=0, dynamic_size=True),   # inferred shifts
+                        tf.TensorArray(dtype=tf.float32, size=0, dynamic_size=True),   # z_pres probabilities
+                        tf.TensorArray(dtype=tf.float32, size=0, dynamic_size=True),   # z_pres KL-divergence
+                        tf.TensorArray(dtype=tf.float32, size=0, dynamic_size=True),   # scale KL-divergence
+                        tf.TensorArray(dtype=tf.float32, size=0, dynamic_size=True),   # shift KL-divergence
+                        tf.TensorArray(dtype=tf.float32, size=0, dynamic_size=True)    # VAE KL-divergence
+                    ]
+                )
 
-        # the inferred digit count
-        self.rec_num_digits = digits
-
-        # all scales and shifts fetched from while_loop iterations
-        self.rec_scales = tf.transpose(scales.stack(), (1, 0, 2))
-        self.rec_shifts = tf.transpose(shifts.stack(), (1, 0, 2))
+        # transposing contents of TensorArray's fetched from while_loop iterations
+        self.rec_scales = tf.transpose(scales.stack(), (1, 0, 2), name="rec_scales")
+        self.rec_shifts = tf.transpose(shifts.stack(), (1, 0, 2), name="rec_shifts")
+        self.z_pres_probs = tf.transpose(z_pres_probs.stack(), name="z_pres_probs")
+        self.z_pres_kls = tf.transpose(z_pres_kls.stack(), name="z_pres_kls")
+        self.scale_kls = tf.transpose(scale_kls.stack(), name="scale_kls")
+        self.shift_kls = tf.transpose(shift_kls.stack(), name="shift_kls")
+        self.vae_kls = tf.transpose(vae_kls.stack(), name="vae_kls")
 
         with tf.name_scope("loss/reconstruction"):
             # clipping the reconstructed canvas by [0.0, 1.0]
-            self.reconstruction = tf.maximum(tf.minimum(reconstruction, 1.0), 0.0)
+            self.reconstruction = tf.maximum(tf.minimum(reconstruction, 1.0), 0.0, name="clipped_rec")
 
-            # adding reconstruction loss
-            loss -= tf.reduce_sum(
+            # reconstruction loss: cross-entropy between
+            # original images and their reconstructions
+            self.reconstruction_loss = -tf.reduce_sum(
                 self.input_images * tf.log(self.reconstruction + 10e-10) +
-                (1.0 - self.input_images) * tf.log(1.0 - self.reconstruction + 10e-10), 1
+                (1.0 - self.input_images) * tf.log(1.0 - self.reconstruction + 10e-10),
+                1, name="reconstruction_loss"
             )
 
-        # averaging the loss wrt. a batch
+            loss += self.reconstruction_loss
+
+        # scalar summaries grouped by digit count
+        self._summary_by_digit_count(self.rec_num_digits, self.target_num_digits, "steps")
+        self._summary_by_digit_count(self.reconstruction_loss, self.target_num_digits, "rec_loss")
+        self._summary_by_digit_count(loss, self.target_num_digits, "total_loss")
+
+        # step-level summaries group by step and digit count
+        self._summary_by_step_and_digit_count(self.rec_scales[:, :, 0], self.rec_num_digits, "scale")
+        self._summary_by_step_and_digit_count(self.z_pres_probs, self.rec_num_digits, "z_pres_prob")
+        self._summary_by_step_and_digit_count(self.z_pres_kls, self.rec_num_digits, "z_pres_kl")
+        self._summary_by_step_and_digit_count(self.scale_kls, self.rec_num_digits, "scale_kl")
+        self._summary_by_step_and_digit_count(self.shift_kls, self.rec_num_digits, "shift_kl")
+        self._summary_by_step_and_digit_count(self.vae_kls, self.rec_num_digits, "vae_kl")
+
+        # averaging the loss wrt. batch items
         self.loss = tf.reduce_mean(loss, name="loss")
 
         with tf.name_scope("accuracy"):
