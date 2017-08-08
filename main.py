@@ -1,4 +1,5 @@
 import os
+import shutil
 
 import tensorflow as tf
 
@@ -8,10 +9,15 @@ from air_model import AIRModel
 
 
 RESULTS_FOLDER = "air_results/"
+IMAGES_FOLDER = RESULTS_FOLDER + "images/"
+MODELS_FOLDER = RESULTS_FOLDER + "models/"
 DATA_FILE = "multi_mnist_data/common.tfrecords"
 
-if not os.path.exists(RESULTS_FOLDER):
-    os.makedirs(RESULTS_FOLDER)
+shutil.rmtree(RESULTS_FOLDER, ignore_errors=True)
+
+os.makedirs(RESULTS_FOLDER)
+os.makedirs(IMAGES_FOLDER)
+os.makedirs(MODELS_FOLDER)
 
 
 EPOCHS = 1000
@@ -20,6 +26,7 @@ NUM_THREADS = 4
 
 CANVAS_SIZE = 50
 
+SAVE_MODEL_EACH_ITERATIONS = 1000
 PLOT_IMAGES_EACH_ITERATIONS = 200
 NUMBER_OF_IMAGES_TO_PLOT = 24
 
@@ -45,6 +52,7 @@ model = AIRModel(
 )
 
 
+saver = tf.train.Saver()
 config = tf.ConfigProto()
 config.gpu_options.allow_growth = True
 
@@ -66,7 +74,7 @@ with tf.Session(config=config) as sess:
 
             print("iteration {}\tloss {:.3f}\taccuracy {:.2f}".format(step, l, a))
 
-            # periodic image saving
+            # periodic image plotting
             if step % PLOT_IMAGES_EACH_ITERATIONS == 0:
                 im, rec, sc, sh, dd = sess.run([
                     images, model.reconstruction,
@@ -77,7 +85,14 @@ with tf.Session(config=config) as sess:
                 plot_digits(
                     im, rec, sc, sh, dd, step,
                     NUMBER_OF_IMAGES_TO_PLOT,
-                    RESULTS_FOLDER
+                    IMAGES_FOLDER
+                )
+
+            # periodic model saving
+            if step % SAVE_MODEL_EACH_ITERATIONS == 0:
+                saver.save(
+                    sess, MODELS_FOLDER + "air-model",
+                    global_step=model.global_step
                 )
 
     except tf.errors.OutOfRangeError:
