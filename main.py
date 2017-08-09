@@ -4,12 +4,10 @@ import shutil
 import tensorflow as tf
 
 from multi_mnist import read_and_decode
-from multi_mnist import plot_digits
 from air_model import AIRModel
 
 
 RESULTS_FOLDER = "air_results/"
-IMAGES_FOLDER = RESULTS_FOLDER + "images/"
 MODELS_FOLDER = RESULTS_FOLDER + "models/"
 SUMMARIES_FOLDER = RESULTS_FOLDER + "summary/"
 SOURCE_FOLDER = RESULTS_FOLDER + "source/"
@@ -20,7 +18,6 @@ shutil.rmtree(RESULTS_FOLDER, ignore_errors=True)
 
 # creating result directories
 os.makedirs(RESULTS_FOLDER)
-os.makedirs(IMAGES_FOLDER)
 os.makedirs(MODELS_FOLDER)
 os.makedirs(SUMMARIES_FOLDER)
 os.makedirs(SOURCE_FOLDER)
@@ -36,12 +33,13 @@ NUM_THREADS = 4
 CANVAS_SIZE = 50
 
 NUM_SUMMARIES_EACH_ITERATIONS = 10
+IMG_SUMMARIES_EACH_ITERATIONS = 200
 SAVE_MODEL_EACH_ITERATIONS = 10000
-PLOT_IMAGES_EACH_ITERATIONS = 200
-NUMBER_OF_IMAGES_TO_PLOT = 24
+NUM_IMAGES_TO_SAVE = 24
 
 
-# fetching a batch of numbers of digits and images from a queue
+# fetching a batch of numbers of
+# digits and images from a queue
 with tf.name_scope("pipeline"):
     filename_queue = tf.train.string_input_producer([DATA_FILE], num_epochs=EPOCHS)
     num_digits, images = read_and_decode(filename_queue, BATCH_SIZE, CANVAS_SIZE, NUM_THREADS)
@@ -54,7 +52,8 @@ model = AIRModel(
     scale_prior_mean=-1.0, scale_prior_variance=0.1, shift_prior_mean=0.0, shift_prior_variance=1.0,
     vae_prior_mean=0.0, vae_prior_variance=1.0, vae_likelihood_std=0.3,
     z_pres_prior=1e-1, gumbel_temperature=10.0, learning_rate=1e-3,
-    gradient_clipping_norm=10.0, annealing_schedules={
+    gradient_clipping_norm=10.0, num_summary_images=NUM_IMAGES_TO_SAVE,
+    annealing_schedules={
         "z_pres_prior": {"init": 1e-1, "min": 1e-9, "factor": 0.5, "iters": 1000},
         "gumbel_temperature": {"init": 10.0, "min": 0.1, "factor": 0.8, "iters": 1000},
         "learning_rate": {"init": 1e-3, "min": 1e-4, "factor": 0.5, "iters": 1000}
@@ -76,6 +75,7 @@ with tf.Session(config=config) as sess:
     saver = tf.train.Saver(max_to_keep=10000)
 
     num_summaries = tf.summary.merge_all("num.summaries")
+    img_summaries = tf.summary.merge_all("img.summaries")
 
     try:
         while True:
@@ -87,23 +87,16 @@ with tf.Session(config=config) as sess:
 
             print("iteration {}\tloss {:.3f}\taccuracy {:.2f}".format(step, l, a))
 
-            # saving numeric summaries
+            # saving summaries: numeric and image
+            # it is assumed that image summary saving period
+            # is divisible by numeric summary saving period
             if step % NUM_SUMMARIES_EACH_ITERATIONS == 0:
-                writer.add_summary(sess.run(num_summaries), step)
-
-            # periodic image plotting
-            if step % PLOT_IMAGES_EACH_ITERATIONS == 0:
-                im, rec, sc, sh, dd = sess.run([
-                    images, model.reconstruction,
-                    model.rec_scales, model.rec_shifts,
-                    model.rec_num_digits
-                ])
-
-                plot_digits(
-                    im, rec, sc, sh, dd, step,
-                    NUMBER_OF_IMAGES_TO_PLOT,
-                    IMAGES_FOLDER
-                )
+                if step % IMG_SUMMARIES_EACH_ITERATIONS == 0:
+                    nums, imgs = sess.run([num_summaries, img_summaries])
+                    writer.add_summary(imgs, step)
+                else:
+                    nums = sess.run(num_summaries)
+                writer.add_summary(nums, step)
 
             # saving model checkpoints
             if step % SAVE_MODEL_EACH_ITERATIONS == 0:

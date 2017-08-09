@@ -14,8 +14,8 @@ class AIRModel:
                  vae_latent_dimensions=50, vae_recognition_units=(512, 256), vae_generative_units=(256, 512),
                  scale_prior_mean=-1.0, scale_prior_variance=0.1, shift_prior_mean=0.0, shift_prior_variance=1.0,
                  vae_prior_mean=0.0, vae_prior_variance=1.0, vae_likelihood_std=0.3,
-                 z_pres_prior=0.01, gumbel_temperature=1.0,
-                 learning_rate=1e-4, gradient_clipping_norm=10.0,
+                 z_pres_prior=0.01, gumbel_temperature=1.0, learning_rate=1e-4,
+                 gradient_clipping_norm=10.0, num_summary_images=12,
                  annealing_schedules=None):
 
         self.input_images = input_images
@@ -44,6 +44,7 @@ class AIRModel:
         self.gumbel_temperature = gumbel_temperature
         self.learning_rate = learning_rate
         self.gradient_clipping_norm = gradient_clipping_norm
+        self.num_summary_images = num_summary_images
 
         with tf.name_scope("air"):
             self.global_step = tf.Variable(0, trainable=False, name="global_step")
@@ -87,7 +88,28 @@ class AIRModel:
         standard_normal = tf.random_normal(tf.shape(mean))
         return mean + standard_normal * tf.sqrt(diag_variance)
 
-    def _summary_by_digit_count(self, tensor, digits, name):
+    @staticmethod
+    def _draw_colored_bounding_boxes(images, boxes, steps):
+        channels = []
+
+        for c in range(3):
+            # c-th colored bounding box with the color
+            # corresponding to c-th channel (R, G, or B)
+            channel_box = tf.expand_dims(boxes[:, c, :], 1)
+
+            # drawing the box only if there was c-th
+            # step in a particular image in the batch
+            channels.append(tf.where(
+                tf.greater(steps, 0),
+                tf.image.draw_bounding_boxes(images, channel_box),    # images with a box
+                images                                                # original images (without a box)
+            ))
+
+        # concatenating all three channels to obtain
+        # potentially three R, G, and B bounding boxes
+        return tf.concat(channels, axis=3)
+
+    def _summarize_by_digit_count(self, tensor, digits, name):
         # converting to float in case of int tensors
         float_tensor = tf.cast(tensor, tf.float32)
 
@@ -98,22 +120,22 @@ class AIRModel:
                 name + "_" + str(i) + "_dig",
                 tf.reduce_mean(tf.boolean_mask(
                     float_tensor, tf.equal(digits, i)
-                )), ["num.summaries"]
+                )), collections=["num.summaries"]
             )
 
         # summarizing the scalar for all images
         tf.summary.scalar(
             name + "_all_dig",
             tf.reduce_mean(float_tensor),
-            ["num.summaries"]
+            collections=["num.summaries"]
         )
 
-    def _summary_by_step_and_digit_count(self, tensor, steps, name, one_more_step=False, all_steps=False):
+    def _summarize_by_step_and_digit_count(self, tensor, steps, name, one_more_step=False, all_steps=False):
         for i in range(self.max_steps):
             if all_steps:
                 # summarizing the entire (i+1)-st step without
                 # differentiating between actual step counts
-                self._summary_by_digit_count(
+                self._summarize_by_digit_count(
                     tensor[:, i], self.target_num_digits,
                     name + "_" + str(i+1) + "_step"
                 )
@@ -124,11 +146,39 @@ class AIRModel:
 
                 # summarizing (i+1)-st step only for those
                 # batch items that actually had (i+1)-st step
-                self._summary_by_digit_count(
+                self._summarize_by_digit_count(
                     tf.boolean_mask(tensor[:, i], mask),
                     tf.boolean_mask(self.target_num_digits, mask),
                     name + "_" + str(i+1) + "_step"
                 )
+
+    def _visualize_reconstructions(self, original, reconstruction, scales, shifts, steps, zoom):
+        # enlarging the original images
+        large_original = tf.image.resize_images(
+            tf.reshape(original, [-1, self.canvas_size, self.canvas_size, 1]),
+            [zoom * self.canvas_size, zoom * self.canvas_size]
+        )
+
+        # enlarging the reconstructions
+        large_reconstruction = tf.image.resize_images(
+            tf.reshape(reconstruction, [-1, self.canvas_size, self.canvas_size, 1]),
+            [zoom * self.canvas_size, zoom * self.canvas_size]
+        )
+
+        # computing the bounding boxes
+        # from inferred scales and shifts
+        size = scales[:, :, 0]
+        left = (1.0 + shifts[:, :, 0] - size) / 2.0
+        top = (1.0 + shifts[:, :, 1] - size) / 2.0
+        boxes = tf.stack([top, left, top+size, left+size], axis=2)
+
+        # concatenating resulting original and reconstructed images with
+        # bounding boxes drawn on them and a thin white stripe between them
+        return tf.concat([
+            self._draw_colored_bounding_boxes(large_original, boxes, steps),         # original images with boxes
+            tf.ones([tf.shape(large_original)[0], zoom * self.canvas_size, 5, 3]),   # thin white stripe between
+            self._draw_colored_bounding_boxes(large_reconstruction, boxes, steps),   # reconstructed images with boxes
+        ], axis=2)
 
     def _create_model(self):
         # condition of tf.while_loop
@@ -345,21 +395,36 @@ class AIRModel:
                 tf.float32
             )
 
-        # scalar summaries grouped by digit count
-        self._summary_by_digit_count(self.rec_num_digits, self.target_num_digits, "steps")
-        self._summary_by_digit_count(self.reconstruction_loss, self.target_num_digits, "rec_loss")
-        self._summary_by_digit_count(accuracy, self.target_num_digits, "digit_acc")
-        self._summary_by_digit_count(loss, self.target_num_digits, "total_loss")
+        # post while-loop numeric summaries grouped by digit count
+        self._summarize_by_digit_count(self.rec_num_digits, self.target_num_digits, "steps")
+        self._summarize_by_digit_count(self.reconstruction_loss, self.target_num_digits, "rec_loss")
+        self._summarize_by_digit_count(accuracy, self.target_num_digits, "digit_acc")
+        self._summarize_by_digit_count(loss, self.target_num_digits, "total_loss")
 
-        # step-level summaries group by step and digit count
-        self._summary_by_step_and_digit_count(self.rec_scales[:, :, 0], self.rec_num_digits, "scale")
-        self._summary_by_step_and_digit_count(self.z_pres_probs, self.rec_num_digits, "z_pres_prob", all_steps=True)
-        self._summary_by_step_and_digit_count(self.z_pres_kls, self.rec_num_digits, "z_pres_kl", one_more_step=True)
-        self._summary_by_step_and_digit_count(self.scale_kls, self.rec_num_digits, "scale_kl")
-        self._summary_by_step_and_digit_count(self.shift_kls, self.rec_num_digits, "shift_kl")
-        self._summary_by_step_and_digit_count(self.vae_kls, self.rec_num_digits, "vae_kl")
+        # step-level numeric summaries (from within while-loop) grouped by step and digit count
+        self._summarize_by_step_and_digit_count(self.rec_scales[:, :, 0], self.rec_num_digits, "scale")
+        self._summarize_by_step_and_digit_count(self.z_pres_probs, self.rec_num_digits, "z_pres_prob", all_steps=True)
+        self._summarize_by_step_and_digit_count(self.z_pres_kls, self.rec_num_digits, "z_pres_kl", one_more_step=True)
+        self._summarize_by_step_and_digit_count(self.scale_kls, self.rec_num_digits, "scale_kl")
+        self._summarize_by_step_and_digit_count(self.shift_kls, self.rec_num_digits, "shift_kl")
+        self._summarize_by_step_and_digit_count(self.vae_kls, self.rec_num_digits, "vae_kl")
 
-        # averaging wrt. batch items
+        # image summary of the reconstructions
+        tf.summary.image(
+            "reconstruction",
+            self._visualize_reconstructions(
+                self.input_images[:self.num_summary_images],
+                self.reconstruction[:self.num_summary_images],
+                self.rec_scales[:self.num_summary_images],
+                self.rec_shifts[:self.num_summary_images],
+                self.rec_num_digits[:self.num_summary_images],
+                zoom=4
+            ),
+            max_outputs=self.num_summary_images,
+            collections=["img.summaries"]
+        )
+
+        # averaging between batch items
         self.loss = tf.reduce_mean(loss, name="loss")
         self.accuracy = tf.reduce_mean(accuracy, name="accuracy")
 
