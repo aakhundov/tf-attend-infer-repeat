@@ -328,11 +328,20 @@ class AIRModel:
                 1, name="reconstruction_loss"
             )
 
-            loss += self.reconstruction_loss
+        # adding reconstruction loss
+        loss += self.reconstruction_loss
+
+        with tf.name_scope("accuracy"):
+            # accuracy of inferred number of digits
+            accuracy = tf.cast(
+                tf.equal(self.target_num_digits, self.rec_num_digits),
+                tf.float32
+            )
 
         # scalar summaries grouped by digit count
         self._summary_by_digit_count(self.rec_num_digits, self.target_num_digits, "steps")
         self._summary_by_digit_count(self.reconstruction_loss, self.target_num_digits, "rec_loss")
+        self._summary_by_digit_count(accuracy, self.target_num_digits, "digit_acc")
         self._summary_by_digit_count(loss, self.target_num_digits, "total_loss")
 
         # step-level summaries group by step and digit count
@@ -343,15 +352,9 @@ class AIRModel:
         self._summary_by_step_and_digit_count(self.shift_kls, self.rec_num_digits, "shift_kl")
         self._summary_by_step_and_digit_count(self.vae_kls, self.rec_num_digits, "vae_kl")
 
-        # averaging the loss wrt. batch items
+        # averaging wrt. batch items
         self.loss = tf.reduce_mean(loss, name="loss")
-
-        with tf.name_scope("accuracy"):
-            # accuracy of inferred number of digits
-            self.accuracy = tf.reduce_mean(tf.cast(
-                tf.equal(self.target_num_digits, self.rec_num_digits),
-                tf.float32
-            ))
+        self.accuracy = tf.reduce_mean(accuracy, name="accuracy")
 
         with tf.name_scope("training"):
             # optimizer to minimize the loss function
