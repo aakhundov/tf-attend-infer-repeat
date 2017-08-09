@@ -80,17 +80,16 @@ with tf.Session(config=config) as sess:
     try:
         while True:
             # training
-            _, l, a, step, ns = sess.run([
+            _, l, a, step = sess.run([
                 model.training, model.loss,
-                model.accuracy, model.global_step,
-                num_summaries
+                model.accuracy, model.global_step
             ])
 
             print("iteration {}\tloss {:.3f}\taccuracy {:.2f}".format(step, l, a))
 
             # saving numeric summaries
             if step % NUM_SUMMARIES_EACH_ITERATIONS == 0:
-                writer.add_summary(ns, step)
+                writer.add_summary(sess.run(num_summaries), step)
 
             # periodic image plotting
             if step % PLOT_IMAGES_EACH_ITERATIONS == 0:
