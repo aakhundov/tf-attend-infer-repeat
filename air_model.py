@@ -111,18 +111,6 @@ class AIRModel:
                 name + "_" + str(i+1) + "_step"
             )
 
-        mask = tf.greater(steps, 0)
-        masked_sum = tf.reduce_sum(
-            tensor * tf.cast(tf.sequence_mask(steps, self.max_steps), tensor.dtype),
-            axis=1
-        )
-
-        self._summary_by_digit_count(
-            tf.boolean_mask(masked_sum / tf.cast(steps, tensor.dtype), mask),
-            tf.boolean_mask(self.target_num_digits, mask),
-            name + "_avg_step"
-        )
-
     def _create_model(self):
         # condition of tf.while_loop
         def cond(step, not_finished, *_):
