@@ -82,13 +82,18 @@ class AIRModel:
 
     @staticmethod
     def _sample_from_mvn(mean, diag_variance):
+        # sampling from the multivariate normal
+        # with given mean and diagonal covaraince
         standard_normal = tf.random_normal(tf.shape(mean))
         return mean + standard_normal * tf.sqrt(diag_variance)
 
     def _summary_by_digit_count(self, tensor, digits, name):
+        # converting to float in case of int tensors
         float_tensor = tf.cast(tensor, tf.float32)
 
         for i in range(self.max_digits+1):
+            # summarizing the scalar for only those
+            # images that have exactly i digits
             tf.summary.scalar(
                 name + "_" + str(i) + "_dig",
                 tf.reduce_mean(tf.boolean_mask(
@@ -96,20 +101,34 @@ class AIRModel:
                 )), ["num.summaries"]
             )
 
+        # summarizing the scalar for all images
         tf.summary.scalar(
             name + "_all_dig",
             tf.reduce_mean(float_tensor),
             ["num.summaries"]
         )
 
-    def _summary_by_step_and_digit_count(self, tensor, steps, name):
+    def _summary_by_step_and_digit_count(self, tensor, steps, name, one_more_step=False, all_steps=False):
         for i in range(self.max_steps):
-            mask = tf.greater(steps, i)
-            self._summary_by_digit_count(
-                tf.boolean_mask(tensor[:, i], mask),
-                tf.boolean_mask(self.target_num_digits, mask),
-                name + "_" + str(i+1) + "_step"
-            )
+            if all_steps:
+                # summarizing the entire (i+1)-st step without
+                # differentiating between actual step counts
+                self._summary_by_digit_count(
+                    tensor[:, i], self.target_num_digits,
+                    name + "_" + str(i+1) + "_step"
+                )
+            else:
+                # considering one more step if required by one_more_step=True
+                # by subtracting 1 from loop variable i (e.g. 0 steps > -1)
+                mask = tf.greater(steps, i - (1 if one_more_step else 0))
+
+                # summarizing (i+1)-st step only for those
+                # batch items that actually had (i+1)-st step
+                self._summary_by_digit_count(
+                    tf.boolean_mask(tensor[:, i], mask),
+                    tf.boolean_mask(self.target_num_digits, mask),
+                    name + "_" + str(i+1) + "_step"
+                )
 
     def _create_model(self):
         # condition of tf.while_loop
@@ -334,8 +353,8 @@ class AIRModel:
 
         # step-level summaries group by step and digit count
         self._summary_by_step_and_digit_count(self.rec_scales[:, :, 0], self.rec_num_digits, "scale")
-        self._summary_by_step_and_digit_count(self.z_pres_probs, self.rec_num_digits, "z_pres_prob")
-        self._summary_by_step_and_digit_count(self.z_pres_kls, self.rec_num_digits, "z_pres_kl")
+        self._summary_by_step_and_digit_count(self.z_pres_probs, self.rec_num_digits, "z_pres_prob", all_steps=True)
+        self._summary_by_step_and_digit_count(self.z_pres_kls, self.rec_num_digits, "z_pres_kl", one_more_step=True)
         self._summary_by_step_and_digit_count(self.scale_kls, self.rec_num_digits, "scale_kl")
         self._summary_by_step_and_digit_count(self.shift_kls, self.rec_num_digits, "shift_kl")
         self._summary_by_step_and_digit_count(self.vae_kls, self.rec_num_digits, "vae_kl")
