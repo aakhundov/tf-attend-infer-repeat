@@ -14,8 +14,8 @@ class AIRModel:
                  vae_latent_dimensions=50, vae_recognition_units=(512, 256), vae_generative_units=(256, 512),
                  scale_prior_mean=-1.0, scale_prior_variance=0.1, shift_prior_mean=0.0, shift_prior_variance=1.0,
                  vae_prior_mean=0.0, vae_prior_variance=1.0, vae_likelihood_std=0.3,
-                 z_pres_prior=0.01, gumbel_temperature=1.0, learning_rate=1e-4,
-                 gradient_clipping_norm=10.0, num_summary_images=12,
+                 z_pres_prior=0.01, gumbel_temperature=1.0, learning_rate=1e-4, gradient_clipping_norm=10.0,
+                 num_summary_images=12, train=False, reuse=False,
                  annealing_schedules=None):
 
         self.input_images = input_images
@@ -46,8 +46,13 @@ class AIRModel:
         self.gradient_clipping_norm = gradient_clipping_norm
         self.num_summary_images = num_summary_images
 
-        with tf.name_scope("air"):
-            self.global_step = tf.Variable(0, trainable=False, name="global_step")
+        self.train = train
+        self.num_summaries = []
+        self.img_summaries = []
+
+        with tf.variable_scope("air", reuse=reuse):
+            self.global_step = tf.get_variable(name="global_step", shape=[], dtype=tf.int32,
+                                               initializer=tf.constant_initializer(0))
 
             self.scale_prior_log_variance = tf.log(scale_prior_variance, name="scale_prior_log_variance")
             self.shift_prior_log_variance = tf.log(shift_prior_variance, name="shift_prior_log_variance")
@@ -116,21 +121,24 @@ class AIRModel:
         for i in range(self.max_digits+1):
             # summarizing the scalar for only those
             # images that have exactly i digits
-            tf.summary.scalar(
-                name + "_" + str(i) + "_dig",
-                tf.reduce_mean(tf.boolean_mask(
-                    float_tensor, tf.equal(digits, i)
-                )), collections=["num.summaries"]
+            self.num_summaries.append(
+                tf.summary.scalar(
+                    name + "_" + str(i) + "_dig",
+                    tf.reduce_mean(tf.boolean_mask(
+                        float_tensor, tf.equal(digits, i)
+                    ))
+                )
             )
 
         # summarizing the scalar for all images
-        tf.summary.scalar(
-            name + "_all_dig",
-            tf.reduce_mean(float_tensor),
-            collections=["num.summaries"]
+        self.num_summaries.append(
+            tf.summary.scalar(
+                name + "_all_dig",
+                tf.reduce_mean(float_tensor)
+            )
         )
 
-    def _summarize_by_step_and_digit_count(self, tensor, steps, name, one_more_step=False, all_steps=False):
+    def _summarize_by_step(self, tensor, steps, name, one_more_step=False, all_steps=False):
         for i in range(self.max_steps):
             if all_steps:
                 # summarizing the entire (i+1)-st step without
@@ -176,7 +184,7 @@ class AIRModel:
         # bounding boxes drawn on them and a thin white stripe between them
         return tf.concat([
             self._draw_colored_bounding_boxes(large_original, boxes, steps),         # original images with boxes
-            tf.ones([tf.shape(large_original)[0], zoom * self.canvas_size, 5, 3]),   # thin white stripe between
+            tf.ones([tf.shape(large_original)[0], zoom * self.canvas_size, 4, 3]),   # thin white stripe between
             self._draw_colored_bounding_boxes(large_reconstruction, boxes, steps),   # reconstructed images with boxes
         ], axis=2)
 
@@ -194,33 +202,33 @@ class AIRModel:
                  scales_ta, shifts_ta, z_pres_probs_ta,
                  z_pres_kls_ta, scale_kls_ta, shift_kls_ta, vae_kls_ta):
 
-            with tf.name_scope("lstm") as scope:
+            with tf.variable_scope("lstm") as scope:
                 # RNN time step
                 outputs, next_state = cell(inputs, prev_state, scope=scope)
 
-            with tf.name_scope("scale"):
+            with tf.variable_scope("scale"):
                 # sampling scale
-                with tf.name_scope("mean") as scope:
+                with tf.variable_scope("mean") as scope:
                     scale_mean = layers.fully_connected(outputs, 1, activation_fn=None, scope=scope)
-                with tf.name_scope("log_variance") as scope:
+                with tf.variable_scope("log_variance") as scope:
                     scale_log_variance = layers.fully_connected(outputs, 1, activation_fn=None, scope=scope)
                 scale_variance = tf.exp(scale_log_variance)
                 scale = tf.nn.sigmoid(self._sample_from_mvn(scale_mean, scale_variance))
                 scales_ta = scales_ta.write(scales_ta.size(), scale)
                 s = tf.squeeze(scale)
 
-            with tf.name_scope("shift"):
+            with tf.variable_scope("shift"):
                 # sampling shift
-                with tf.name_scope("mean") as scope:
+                with tf.variable_scope("mean") as scope:
                     shift_mean = layers.fully_connected(outputs, 2, activation_fn=None, scope=scope)
-                with tf.name_scope("log_variance") as scope:
+                with tf.variable_scope("log_variance") as scope:
                     shift_log_variance = layers.fully_connected(outputs, 2, activation_fn=None, scope=scope)
                 shift_variance = tf.exp(shift_log_variance)
                 shift = tf.nn.tanh(self._sample_from_mvn(shift_mean, shift_variance))
                 shifts_ta = shifts_ta.write(shifts_ta.size(), shift)
                 x, y = shift[:, 0], shift[:, 1]
 
-            with tf.name_scope("st_forward"):
+            with tf.variable_scope("st_forward"):
                 # ST: theta of forward transformation
                 theta = tf.stack([
                     tf.concat([tf.stack([s, tf.zeros_like(s)], axis=1), tf.expand_dims(x, 1)], axis=1),
@@ -233,7 +241,7 @@ class AIRModel:
                     theta, [self.windows_size, self.windows_size]
                 ))
 
-            with tf.name_scope("vae"):
+            with tf.variable_scope("vae"):
                 # reconstructing the window in VAE
                 vae_recon, vae_mean, vae_log_variance = vae(
                     tf.reshape(window, [-1, self.windows_size * self.windows_size]), self.windows_size ** 2,
@@ -241,7 +249,7 @@ class AIRModel:
                     self.vae_likelihood_std
                 )
 
-            with tf.name_scope("st_backward"):
+            with tf.variable_scope("st_backward"):
                 # ST: theta of backward transformation
                 theta_recon = tf.stack([
                     tf.concat([tf.stack([1.0 / s, tf.zeros_like(s)], axis=1), tf.expand_dims(-x / s, 1)], axis=1),
@@ -254,16 +262,16 @@ class AIRModel:
                     theta_recon, [self.canvas_size, self.canvas_size]
                 ))
 
-            with tf.name_scope("z_pres"):
+            with tf.variable_scope("z_pres"):
                 # sampling z_pres flag (1 - more digits, 0 - no more digits)
-                with tf.name_scope("log_odds") as scope:
+                with tf.variable_scope("log_odds") as scope:
                     z_pres_log_odds = tf.squeeze(layers.fully_connected(outputs, 1, activation_fn=None, scope=scope))
-                with tf.name_scope("gumbel"):
+                with tf.variable_scope("gumbel"):
                     z_pres = gumbel_softmax_binary(z_pres_log_odds, self.gumbel_temperature, hard=True)
                     z_pres_prob = tf.exp(z_pres_log_odds) / (1.0 + tf.exp(z_pres_log_odds))
                     z_pres_probs_ta = z_pres_probs_ta.write(z_pres_probs_ta.size(), z_pres_prob)
 
-            with tf.name_scope("loss/z_pres_kl"):
+            with tf.variable_scope("loss/z_pres_kl"):
                 # z_pres KL-divergence:
                 # previous value of not_finished is used
                 # to account for KL of first z_pres=0
@@ -290,12 +298,12 @@ class AIRModel:
             # running inferred number of digits per batch item
             running_digits += tf.cast(not_finished, tf.int32)
 
-            with tf.name_scope("canvas"):
+            with tf.variable_scope("canvas"):
                 # adding reconstructed window to the running canvas
                 running_recon += tf.expand_dims(not_finished, 1) * \
                     tf.reshape(window_recon, [-1, self.canvas_size * self.canvas_size])
 
-            with tf.name_scope("loss/scale_kl"):
+            with tf.variable_scope("loss/scale_kl"):
                 # scale KL-divergence
                 scale_kl = not_finished * (
                     0.5 * tf.reduce_sum(
@@ -307,7 +315,7 @@ class AIRModel:
                 scale_kls_ta = scale_kls_ta.write(scale_kls_ta.size(), scale_kl)
                 running_loss += scale_kl
 
-            with tf.name_scope("loss/shift_kl"):
+            with tf.variable_scope("loss/shift_kl"):
                 # shift KL-divergence
                 shift_kl = not_finished * (
                     0.5 * tf.reduce_sum(
@@ -319,7 +327,7 @@ class AIRModel:
                 shift_kls_ta = shift_kls_ta.write(shift_kls_ta.size(), shift_kl)
                 running_loss += shift_kl
 
-            with tf.name_scope("loss/VAE_kl"):
+            with tf.variable_scope("loss/VAE_kl"):
                 # VAE KL_DIVERGENCE
                 vae_kl = not_finished * (
                     0.5 * tf.reduce_sum(
@@ -331,14 +339,16 @@ class AIRModel:
                 vae_kls_ta = vae_kls_ta.write(vae_kls_ta.size(), vae_kl)
                 running_loss += vae_kl
 
+            running_loss.set_shape([None])
+
             return step + 1, not_finished, next_state, inputs, \
                 running_recon, running_loss, running_digits, \
                 scales_ta, shifts_ta, z_pres_probs_ta, \
                 z_pres_kls_ta, scale_kls_ta, shift_kls_ta, vae_kls_ta
 
-        with tf.name_scope("rnn"):
+        with tf.variable_scope("rnn") as rnn_scope:
             # creating RNN cells and initial state
-            cell = rnn.BasicLSTMCell(self.lstm_units)
+            cell = rnn.BasicLSTMCell(self.lstm_units, reuse=rnn_scope.reuse)
             rnn_init_state = cell.zero_state(
                 self.batch_size, self.input_images.dtype
             )
@@ -373,7 +383,7 @@ class AIRModel:
         self.shift_kls = tf.transpose(shift_kls.stack(), name="shift_kls")
         self.vae_kls = tf.transpose(vae_kls.stack(), name="vae_kls")
 
-        with tf.name_scope("loss/reconstruction"):
+        with tf.variable_scope("loss/reconstruction"):
             # clipping the reconstructed canvas by [0.0, 1.0]
             self.reconstruction = tf.maximum(tf.minimum(reconstruction, 1.0), 0.0, name="clipped_rec")
 
@@ -388,58 +398,61 @@ class AIRModel:
         # adding reconstruction loss
         loss += self.reconstruction_loss
 
-        with tf.name_scope("accuracy"):
+        with tf.variable_scope("accuracy"):
             # accuracy of inferred number of digits
             accuracy = tf.cast(
                 tf.equal(self.target_num_digits, self.rec_num_digits),
                 tf.float32
             )
 
-        # post while-loop numeric summaries grouped by digit count
-        self._summarize_by_digit_count(self.rec_num_digits, self.target_num_digits, "steps")
-        self._summarize_by_digit_count(self.reconstruction_loss, self.target_num_digits, "rec_loss")
-        self._summarize_by_digit_count(accuracy, self.target_num_digits, "digit_acc")
-        self._summarize_by_digit_count(loss, self.target_num_digits, "total_loss")
+        with tf.variable_scope("summaries"):
+            # averaging between batch items
+            self.loss = tf.reduce_mean(loss, name="loss")
+            self.accuracy = tf.reduce_mean(accuracy, name="accuracy")
 
-        # step-level numeric summaries (from within while-loop) grouped by step and digit count
-        self._summarize_by_step_and_digit_count(self.rec_scales[:, :, 0], self.rec_num_digits, "scale")
-        self._summarize_by_step_and_digit_count(self.z_pres_probs, self.rec_num_digits, "z_pres_prob", all_steps=True)
-        self._summarize_by_step_and_digit_count(self.z_pres_kls, self.rec_num_digits, "z_pres_kl", one_more_step=True)
-        self._summarize_by_step_and_digit_count(self.scale_kls, self.rec_num_digits, "scale_kl")
-        self._summarize_by_step_and_digit_count(self.shift_kls, self.rec_num_digits, "shift_kl")
-        self._summarize_by_step_and_digit_count(self.vae_kls, self.rec_num_digits, "vae_kl")
+            # post while-loop numeric summaries grouped by digit count
+            self._summarize_by_digit_count(self.rec_num_digits, self.target_num_digits, "steps")
+            self._summarize_by_digit_count(self.reconstruction_loss, self.target_num_digits, "rec_loss")
+            self._summarize_by_digit_count(accuracy, self.target_num_digits, "digit_acc")
+            self._summarize_by_digit_count(loss, self.target_num_digits, "total_loss")
 
-        # image summary of the reconstructions
-        tf.summary.image(
-            "reconstruction",
-            self._visualize_reconstructions(
-                self.input_images[:self.num_summary_images],
-                self.reconstruction[:self.num_summary_images],
-                self.rec_scales[:self.num_summary_images],
-                self.rec_shifts[:self.num_summary_images],
-                self.rec_num_digits[:self.num_summary_images],
-                zoom=4
-            ),
-            max_outputs=self.num_summary_images,
-            collections=["img.summaries"]
-        )
+            # step-level numeric summaries (from within while-loop) grouped by step and digit count
+            self._summarize_by_step(self.rec_scales[:, :, 0], self.rec_num_digits, "scale")
+            self._summarize_by_step(self.z_pres_probs, self.rec_num_digits, "z_pres_prob", all_steps=True)
+            self._summarize_by_step(self.z_pres_kls, self.rec_num_digits, "z_pres_kl", one_more_step=True)
+            self._summarize_by_step(self.scale_kls, self.rec_num_digits, "scale_kl")
+            self._summarize_by_step(self.shift_kls, self.rec_num_digits, "shift_kl")
+            self._summarize_by_step(self.vae_kls, self.rec_num_digits, "vae_kl")
 
-        # averaging between batch items
-        self.loss = tf.reduce_mean(loss, name="loss")
-        self.accuracy = tf.reduce_mean(accuracy, name="accuracy")
-
-        with tf.name_scope("training"):
-            # optimizer to minimize the loss function
-            optimizer = tf.train.AdamOptimizer(self.learning_rate)
-            grads, variables = zip(*optimizer.compute_gradients(self.loss))
-
-            if self.gradient_clipping_norm is not None:
-                # gradient clipping by global norm, if required
-                grads = tf.clip_by_global_norm(grads, self.gradient_clipping_norm)[0]
-
-            grads_and_vars = list(zip(grads, variables))
-
-            # training step operation
-            self.training = optimizer.apply_gradients(
-                grads_and_vars, global_step=self.global_step
+            # image summary of the reconstructions
+            self.img_summaries.append(
+                tf.summary.image(
+                    "reconstruction",
+                    self._visualize_reconstructions(
+                        self.input_images[:self.num_summary_images],
+                        self.reconstruction[:self.num_summary_images],
+                        self.rec_scales[:self.num_summary_images],
+                        self.rec_shifts[:self.num_summary_images],
+                        self.rec_num_digits[:self.num_summary_images],
+                        zoom=2
+                    ),
+                    max_outputs=self.num_summary_images
+                )
             )
+
+        if self.train:
+            with tf.variable_scope("training"):
+                # optimizer to minimize the loss function
+                optimizer = tf.train.AdamOptimizer(self.learning_rate)
+                grads, variables = zip(*optimizer.compute_gradients(self.loss))
+
+                if self.gradient_clipping_norm is not None:
+                    # gradient clipping by global norm, if required
+                    grads = tf.clip_by_global_norm(grads, self.gradient_clipping_norm)[0]
+
+                grads_and_vars = list(zip(grads, variables))
+
+                # training step operation
+                self.training = optimizer.apply_gradients(
+                    grads_and_vars, global_step=self.global_step
+                )

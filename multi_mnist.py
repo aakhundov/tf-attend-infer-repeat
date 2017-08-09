@@ -104,26 +104,15 @@ def read_and_decode(fqueue, batch_size, canvas_size, num_threads):
     features = tf.parse_single_example(
         value,
         features={
-            'digits': tf.FixedLenFeature([], tf.int64),
             'image': tf.FixedLenFeature([], tf.string),
-            # 'height': tf.FixedLenFeature([], tf.int64),
-            # 'width': tf.FixedLenFeature([], tf.int64),
-            # 'indices': tf.FixedLenFeature([], tf.string),
-            # 'positions': tf.FixedLenFeature([], tf.string),
-            # 'boxes': tf.FixedLenFeature([], tf.string),
-            # 'labels': tf.FixedLenFeature([], tf.string),
+            'digits': tf.FixedLenFeature([], tf.int64)
         }
     )
 
-    digs = tf.cast(features['digits'], tf.int32)
     batch = tf.train.shuffle_batch(
         [
-            digs,
             tf.reshape(tf.decode_raw(features['image'], tf.float32), [canvas_size * canvas_size]),
-            # tf.reshape(tf.pad(tf.decode_raw(features['indices'], tf.int32), [[0, 3 - digs]]), [3]),
-            # tf.reshape(tf.pad(tf.decode_raw(features['positions'], tf.int32), [[0, 6 - 2 * digs]]), [6]),
-            # tf.reshape(tf.pad(tf.decode_raw(features['boxes'], tf.int32), [[0, 6 - 2 * digs]]), [6]),
-            # tf.reshape(tf.pad(tf.decode_raw(features['labels'], tf.int32), [[0, 3 - digs]]), [3])
+            tf.cast(features['digits'], tf.int32)
         ],
         batch_size=batch_size,
         capacity=10000+batch_size*10,
@@ -134,11 +123,26 @@ def read_and_decode(fqueue, batch_size, canvas_size, num_threads):
     return batch
 
 
+def read_test_data(filename):
+    record_iterator = tf.python_io.tf_record_iterator(path=filename)
+
+    images_list, digits_list = [], []
+    for string_record in record_iterator:
+        example = tf.train.Example()
+        example.ParseFromString(string_record)
+
+        images_list.append(np.fromstring(example.features.feature['image'].bytes_list.value[0], dtype=np.float32))
+        digits_list.append(int(example.features.feature['digits'].int64_list.value[0]))
+
+    return np.array(images_list), np.array(digits_list)
+
+
 if __name__ == "__main__":
 
     MAX_DIGITS = 5
     MAX_DIGITS_IN_COMMON = 2
     IMAGES_PER_DIGIT = 20000
+    TEST_SET_SIZE = 1000
 
     MNIST_FOLDER = "mnist_data/"
     MULTI_MNIST_FOLDER = "multi_mnist_data/"
@@ -192,6 +196,15 @@ if __name__ == "__main__":
               )
 
             print("Writing 0-{} digit images to common file... ".format(MAX_DIGITS_IN_COMMON), end="", flush=True)
-            write_to_records(MULTI_MNIST_FOLDER + "common", common_images, common_indices,
-                             common_positions, common_boxes, common_labels, common_digits)
+            write_to_records(MULTI_MNIST_FOLDER + "common", 
+                             common_images[TEST_SET_SIZE:], common_indices[TEST_SET_SIZE:],
+                             common_positions[TEST_SET_SIZE:], common_boxes[TEST_SET_SIZE:], 
+                             common_labels[TEST_SET_SIZE:], common_digits[TEST_SET_SIZE:])
+            print("done")
+
+            print("Writing 0-{} digit images to test file... ".format(MAX_DIGITS_IN_COMMON), end="", flush=True)
+            write_to_records(MULTI_MNIST_FOLDER + "test", 
+                             common_images[:TEST_SET_SIZE], common_indices[:TEST_SET_SIZE],
+                             common_positions[:TEST_SET_SIZE], common_boxes[:TEST_SET_SIZE],
+                             common_labels[:TEST_SET_SIZE], common_digits[:TEST_SET_SIZE])
             print("done")
