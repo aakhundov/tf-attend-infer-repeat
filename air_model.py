@@ -105,7 +105,7 @@ class AIRModel:
             # drawing the box only if there was c-th
             # step in a particular image in the batch
             channels.append(tf.where(
-                tf.greater(steps, 0),
+                tf.greater(steps, c),
                 tf.image.draw_bounding_boxes(images, channel_box),    # images with a box
                 images                                                # original images (without a box)
             ))
