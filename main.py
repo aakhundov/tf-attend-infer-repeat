@@ -39,7 +39,7 @@ CANVAS_SIZE = 50
 NUM_SUMMARIES_EACH_ITERATIONS = 50
 VAR_SUMMARIES_EACH_ITERATIONS = 500
 IMG_SUMMARIES_EACH_ITERATIONS = 1000
-SAVE_MODEL_EACH_ITERATIONS = 10000
+SAVE_PARAMS_EACH_ITERATIONS = 10000
 NUM_IMAGES_TO_SAVE = 60
 
 
@@ -96,6 +96,9 @@ with tf.Session(config=config) as sess:
     writer = tf.summary.FileWriter(SUMMARIES_FOLDER, sess.graph)
     saver = tf.train.Saver(max_to_keep=10000)
 
+    # saving initial (randomly initialized) parameter values
+    saver.save(sess, MODELS_FOLDER + "air-model", global_step=0)
+
     # all summaries are fetched from test (not training) model
     num_summaries = tf.summary.merge(test_model.num_summaries)
     var_summaries = tf.summary.merge(test_model.var_summaries)
@@ -108,12 +111,12 @@ with tf.Session(config=config) as sess:
     try:
         while True:
             # training step
-            _, l, a, step = sess.run([
+            _, loss, accuracy, step = sess.run([
                 train_model.training, train_model.loss,
                 train_model.accuracy, train_model.global_step
             ])
 
-            print("iteration {}\tloss {:.3f}\taccuracy {:.2f}".format(step, l, a))
+            print("iteration {}\tloss {:.3f}\taccuracy {:.2f}".format(step, loss, accuracy))
 
             # saving summaries with configured frequency:
             # it is assumed that frequencies of more rare
@@ -151,8 +154,8 @@ with tf.Session(config=config) as sess:
 
                 writer.add_summary(num_sum, step)
 
-            # saving model checkpoints
-            if step % SAVE_MODEL_EACH_ITERATIONS == 0:
+            # saving parameters with configured frequency
+            if step % SAVE_PARAMS_EACH_ITERATIONS == 0:
                 saver.save(
                     sess, MODELS_FOLDER + "air-model",
                     global_step=step
