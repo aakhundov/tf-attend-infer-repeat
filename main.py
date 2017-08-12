@@ -37,7 +37,8 @@ NUM_THREADS = 4
 CANVAS_SIZE = 50
 
 NUM_SUMMARIES_EACH_ITERATIONS = 50
-IMG_SUMMARIES_EACH_ITERATIONS = 500
+VAR_SUMMARIES_EACH_ITERATIONS = 500
+IMG_SUMMARIES_EACH_ITERATIONS = 1000
 SAVE_MODEL_EACH_ITERATIONS = 10000
 NUM_IMAGES_TO_SAVE = 60
 
@@ -70,7 +71,7 @@ for i in range(2):
             scale_prior_mean=-1.0, scale_prior_variance=0.1, shift_prior_mean=0.0, shift_prior_variance=1.0,
             vae_prior_mean=0.0, vae_prior_variance=1.0, vae_likelihood_std=0.3,
             z_pres_prior=1e-1, gumbel_temperature=10.0, learning_rate=1e-3, gradient_clipping_norm=10.0,
-            num_summary_images=NUM_IMAGES_TO_SAVE, train=(i == 0), reuse=(i == 1),
+            num_summary_images=NUM_IMAGES_TO_SAVE, train=(i == 0), reuse=(i == 1), scope="air",
             annealing_schedules={
                 "z_pres_prior": {"init": 1e-1, "min": 1e-9, "factor": 0.5, "iters": 1000},
                 "gumbel_temperature": {"init": 10.0, "min": 0.1, "factor": 0.8, "iters": 1000},
@@ -95,12 +96,13 @@ with tf.Session(config=config) as sess:
     writer = tf.summary.FileWriter(SUMMARIES_FOLDER, sess.graph)
     saver = tf.train.Saver(max_to_keep=10000)
 
-    # numeric and image summaries are merged from test model
+    # all summaries are fetched from test (not training) model
     num_summaries = tf.summary.merge(test_model.num_summaries)
+    var_summaries = tf.summary.merge(test_model.var_summaries)
     img_summaries = tf.summary.merge(test_model.img_summaries)
 
-    # reading the test dataset, to be used with test model for computing
-    # all numeric and image summaries throughout the training process
+    # reading the test dataset, to be used with test model for
+    # computing all summaries throughout the training process
     test_images, test_num_digits = read_test_data(TEST_DATA_FILE)
 
     try:
@@ -113,26 +115,33 @@ with tf.Session(config=config) as sess:
 
             print("iteration {}\tloss {:.3f}\taccuracy {:.2f}".format(step, l, a))
 
-            # saving summaries: numeric and image
-            # it is assumed that image summary saving period
-            # is divisible by numeric summary saving period
+            # saving summaries with configured frequency:
+            # it is assumed that frequencies of more rare
+            # summaries are divisible by more frequent ones
             if step % NUM_SUMMARIES_EACH_ITERATIONS == 0:
-                if step % IMG_SUMMARIES_EACH_ITERATIONS == 0:
-                    # fetching numeric and image
-                    # summaries in one run
-                    nums, imgs = sess.run(
-                        [num_summaries, img_summaries],
-                        feed_dict={
-                            test_data: test_images,
-                            test_targets: test_num_digits
-                        }
-                    )
+                if step % VAR_SUMMARIES_EACH_ITERATIONS == 0:
+                    if step % IMG_SUMMARIES_EACH_ITERATIONS == 0:
+                        num_sum, var_sum, img_sum = sess.run(
+                            [num_summaries, var_summaries, img_summaries],
+                            feed_dict={
+                                test_data: test_images,
+                                test_targets: test_num_digits
+                            }
+                        )
 
-                    # writing image summaries
-                    writer.add_summary(imgs, step)
+                        writer.add_summary(img_sum, step)
+                    else:
+                        num_sum, var_sum = sess.run(
+                            [num_summaries, var_summaries],
+                            feed_dict={
+                                test_data: test_images,
+                                test_targets: test_num_digits
+                            }
+                        )
+
+                    writer.add_summary(var_sum, step)
                 else:
-                    # fetching numeric summaries only
-                    nums = sess.run(
+                    num_sum = sess.run(
                         num_summaries,
                         feed_dict={
                             test_data: test_images,
@@ -140,8 +149,7 @@ with tf.Session(config=config) as sess:
                         }
                     )
 
-                # writing numeric summaries
-                writer.add_summary(nums, step)
+                writer.add_summary(num_sum, step)
 
             # saving model checkpoints
             if step % SAVE_MODEL_EACH_ITERATIONS == 0:

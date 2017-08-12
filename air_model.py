@@ -15,7 +15,7 @@ class AIRModel:
                  scale_prior_mean=-1.0, scale_prior_variance=0.1, shift_prior_mean=0.0, shift_prior_variance=1.0,
                  vae_prior_mean=0.0, vae_prior_variance=1.0, vae_likelihood_std=0.3,
                  z_pres_prior=0.01, gumbel_temperature=1.0, learning_rate=1e-4, gradient_clipping_norm=10.0,
-                 num_summary_images=12, train=False, reuse=False,
+                 num_summary_images=12, train=False, reuse=False, scope="air",
                  annealing_schedules=None):
 
         self.input_images = input_images
@@ -49,10 +49,11 @@ class AIRModel:
         self.train = train
         self.num_summaries = []
         self.img_summaries = []
+        self.var_summaries = []
 
-        with tf.variable_scope("air", reuse=reuse):
+        with tf.variable_scope(scope, reuse=reuse):
             self.global_step = tf.get_variable(name="global_step", shape=[], dtype=tf.int32,
-                                               initializer=tf.constant_initializer(0))
+                                               initializer=tf.constant_initializer(0), trainable=False)
 
             self.scale_prior_log_variance = tf.log(scale_prior_variance, name="scale_prior_log_variance")
             self.shift_prior_log_variance = tf.log(shift_prior_variance, name="shift_prior_log_variance")
@@ -405,6 +406,12 @@ class AIRModel:
                 tf.float32
             )
 
+        var_scope = tf.get_variable_scope().name
+        model_vars = [
+            v for v in tf.trainable_variables()
+            if v.name.startswith(var_scope)
+        ]
+
         with tf.variable_scope("summaries"):
             # averaging between batch items
             self.loss = tf.reduce_mean(loss, name="loss")
@@ -439,6 +446,15 @@ class AIRModel:
                     max_outputs=self.num_summary_images
                 )
             )
+
+            # variable summaries
+            for v in model_vars:
+                self.var_summaries.append(
+                    tf.summary.histogram(
+                        v.name,
+                        v.value()
+                    )
+                )
 
         if self.train:
             with tf.variable_scope("training"):
