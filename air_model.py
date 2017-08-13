@@ -198,14 +198,14 @@ class AIRModel:
             )
 
         # body of tf.while_loop
-        def body(step, not_finished, prev_state, inputs,
+        def body(step, not_finished, prev_state,
                  running_recon, running_loss, running_digits,
                  scales_ta, shifts_ta, z_pres_probs_ta,
                  z_pres_kls_ta, scale_kls_ta, shift_kls_ta, vae_kls_ta):
 
             with tf.variable_scope("lstm") as scope:
                 # RNN time step
-                outputs, next_state = cell(inputs, prev_state, scope=scope)
+                outputs, next_state = cell(self.input_images, prev_state, scope=scope)
 
             with tf.variable_scope("scale"):
                 # sampling scale
@@ -238,7 +238,7 @@ class AIRModel:
 
                 # ST forward transformation: canvas -> window
                 window = tf.squeeze(transformer(
-                    tf.expand_dims(tf.reshape(inputs, [-1, self.canvas_size, self.canvas_size]), 3),
+                    tf.expand_dims(tf.reshape(self.input_images, [-1, self.canvas_size, self.canvas_size]), 3),
                     theta, [self.windows_size, self.windows_size]
                 ))
 
@@ -321,8 +321,8 @@ class AIRModel:
                 shift_kl = not_finished * (
                     0.5 * tf.reduce_sum(
                         self.shift_prior_log_variance - shift_log_variance -
-                        1.0 + shift_variance / self.scale_prior_variance +
-                        tf.square(shift_mean - self.shift_prior_mean) / self.scale_prior_variance, 1
+                        1.0 + shift_variance / self.shift_prior_variance +
+                        tf.square(shift_mean - self.shift_prior_mean) / self.shift_prior_variance, 1
                     )
                 )
                 shift_kls_ta = shift_kls_ta.write(shift_kls_ta.size(), shift_kl)
@@ -342,7 +342,7 @@ class AIRModel:
 
             running_loss.set_shape([None])
 
-            return step + 1, not_finished, next_state, inputs, \
+            return step + 1, not_finished, next_state, \
                 running_recon, running_loss, running_digits, \
                 scales_ta, shifts_ta, z_pres_probs_ta, \
                 z_pres_kls_ta, scale_kls_ta, shift_kls_ta, vae_kls_ta
@@ -355,13 +355,12 @@ class AIRModel:
             )
 
             # RNN while_loop with variable number of steps for each batch item
-            _, _, _, _, reconstruction, loss, self.rec_num_digits, scales, shifts, \
+            _, _, _, reconstruction, loss, self.rec_num_digits, scales, shifts, \
                 z_pres_probs, z_pres_kls, scale_kls, shift_kls, vae_kls = tf.while_loop(
                     cond, body, [
                         tf.constant(0),                                 # RNN time step, initially zero
                         tf.fill([self.batch_size], 1.0),                # "not_finished" tensor, 1 - not finished
                         rnn_init_state,                                 # initial RNN state
-                        self.input_images,                              # original images go to each RNN step
                         tf.zeros_like(self.input_images),               # reconstruction canvas, initially empty
                         tf.zeros([self.batch_size]),                    # running value of the loss function
                         tf.zeros([self.batch_size], dtype=tf.int32),    # running inferred number of digits
