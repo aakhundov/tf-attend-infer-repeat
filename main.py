@@ -1,5 +1,6 @@
 import os
 import shutil
+import argparse
 
 import tensorflow as tf
 
@@ -7,28 +8,6 @@ from multi_mnist import read_and_decode
 from multi_mnist import read_test_data
 
 from air_model import AIRModel
-
-
-RESULTS_FOLDER = "air_results/"
-MODELS_FOLDER = RESULTS_FOLDER + "models/"
-SUMMARIES_FOLDER = RESULTS_FOLDER + "summary/"
-SOURCE_FOLDER = RESULTS_FOLDER + "source/"
-
-TRAIN_DATA_FILE = "multi_mnist_data/common.tfrecords"
-TEST_DATA_FILE = "multi_mnist_data/test.tfrecords"
-
-# removing results folder (with content) if exists
-shutil.rmtree(RESULTS_FOLDER, ignore_errors=True)
-
-# creating result directories
-os.makedirs(RESULTS_FOLDER)
-os.makedirs(MODELS_FOLDER)
-os.makedirs(SUMMARIES_FOLDER)
-os.makedirs(SOURCE_FOLDER)
-
-# creating a copy of the current version of .py sources
-for file in [f for f in os.listdir(".") if f.endswith(".py")]:
-        shutil.copy(file, SOURCE_FOLDER + file)
 
 
 EPOCHS = 300
@@ -42,10 +21,47 @@ IMG_SUMMARIES_EACH_ITERATIONS = 1000
 SAVE_PARAMS_EACH_ITERATIONS = 10000
 NUM_IMAGES_TO_SAVE = 60
 
+DEFAULT_RESULTS_FOLDER = "air_results"
+TRAIN_DATA_FILE = "multi_mnist_data/common.tfrecords"
+TEST_DATA_FILE = "multi_mnist_data/test.tfrecords"
+
+
+# parsing command-line arguments
+parser = argparse.ArgumentParser()
+parser.add_argument("-r", "--results-folder", default=DEFAULT_RESULTS_FOLDER)
+parser.add_argument("-o", "--overwrite-results", type=int, choices=[0, 1], default=0)
+args = parser.parse_args()
+
+MODELS_FOLDER = args.results_folder + "/models/"
+SUMMARIES_FOLDER = args.results_folder + "/summary/"
+SOURCE_FOLDER = args.results_folder + "/source/"
+
+
+# removing existing results folder (with content), if configured so
+# otherwise, throwing an exception if the results folder exists
+if args.overwrite_results:
+    shutil.rmtree(args.results_folder, ignore_errors=True)
+elif os.path.exists(args.results_folder):
+    raise Exception("The folder \"{0}\" already exists".format(
+        args.results_folder
+    ))
+
+# creating result directories
+os.makedirs(args.results_folder)
+os.makedirs(MODELS_FOLDER)
+os.makedirs(SUMMARIES_FOLDER)
+os.makedirs(SOURCE_FOLDER)
+
+# creating a copy of the current version of *.py source files
+for file in [f for f in os.listdir(".") if f.endswith(".py")]:
+        shutil.copy(file, SOURCE_FOLDER + file)
+
 
 with tf.variable_scope("pipeline"):
     # fetching a batch of numbers of digits and images from a queue
-    filename_queue = tf.train.string_input_producer([TRAIN_DATA_FILE], num_epochs=EPOCHS)
+    filename_queue = tf.train.string_input_producer(
+        [TRAIN_DATA_FILE], num_epochs=EPOCHS
+    )
     train_data, train_targets = read_and_decode(
         filename_queue, BATCH_SIZE, CANVAS_SIZE, NUM_THREADS
     )
