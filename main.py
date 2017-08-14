@@ -12,7 +12,6 @@ from air_model import AIRModel
 
 EPOCHS = 300
 BATCH_SIZE = 64
-NUM_THREADS = 4
 CANVAS_SIZE = 50
 
 NUM_SUMMARIES_EACH_ITERATIONS = 50
@@ -21,6 +20,7 @@ IMG_SUMMARIES_EACH_ITERATIONS = 1000
 SAVE_PARAMS_EACH_ITERATIONS = 10000
 NUM_IMAGES_TO_SAVE = 60
 
+DEFAULT_READER_THREADS = 4
 DEFAULT_RESULTS_FOLDER = "air_results"
 TRAIN_DATA_FILE = "multi_mnist_data/common.tfrecords"
 TEST_DATA_FILE = "multi_mnist_data/test.tfrecords"
@@ -30,6 +30,7 @@ TEST_DATA_FILE = "multi_mnist_data/test.tfrecords"
 parser = argparse.ArgumentParser()
 parser.add_argument("-r", "--results-folder", default=DEFAULT_RESULTS_FOLDER)
 parser.add_argument("-o", "--overwrite-results", type=int, choices=[0, 1], default=0)
+parser.add_argument("-t", "--reader-threads", type=int, default=DEFAULT_READER_THREADS)
 args = parser.parse_args()
 
 MODELS_FOLDER = args.results_folder + "/models/"
@@ -63,7 +64,7 @@ with tf.variable_scope("pipeline"):
         [TRAIN_DATA_FILE], num_epochs=EPOCHS
     )
     train_data, train_targets = read_and_decode(
-        filename_queue, BATCH_SIZE, CANVAS_SIZE, NUM_THREADS
+        filename_queue, BATCH_SIZE, CANVAS_SIZE, args.reader_threads
     )
 
     # placeholders for feeding the same test dataset to test model
