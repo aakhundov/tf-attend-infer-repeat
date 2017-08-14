@@ -1,7 +1,9 @@
 Attend, Infer, Repeat
 =====================
 
-Implementation of **AIR** framework proposed in ["Attend, Infer, Repeat: Fast Scene Understanding with Generative Models"](https://arxiv.org/abs/1603.08575) paper by Eslami et al (DeepMind). The implementation is still work in progress. Gumbel-Softmax (Concrete) distribution proposed [here](https://arxiv.org/abs/1611.01144) and [here](https://arxiv.org/abs/1611.00712) is used to back-propagate through discrete random sampling of "z_pres" instead of the [NVIL](https://arxiv.org/abs/1402.0030) used in the original paper. Implemented in TensorFlow.
+Implementation of **AIR** framework proposed in ["Attend, Infer, Repeat: Fast Scene Understanding with Generative Models"](https://arxiv.org/abs/1603.08575) paper by Eslami et al (DeepMind). This is still work in progress. The work has been done in equal contributions with [Alexander Prams](https://github.com/aprams).
+
+Gumbel-Softmax (Concrete) distribution proposed [here](https://arxiv.org/abs/1611.01144) and [here](https://arxiv.org/abs/1611.00712) is used to back-propagate through discrete random sampling of "z_pres" instead of the [NVIL](https://arxiv.org/abs/1402.0030) used in the original paper. The model is implemented in TensorFlow.
 
 * **multi_mnist.py** needs to be run before training the model for generation of multi-MNIST dataset.
 * **main.py** is a runnable script for running the model training code with default configuration parameters (passed to a constructor of AIRModel).
