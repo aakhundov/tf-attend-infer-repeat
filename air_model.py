@@ -50,6 +50,7 @@ class AIRModel:
         self.num_summaries = []
         self.img_summaries = []
         self.var_summaries = []
+        self.grad_summaries = []
 
         with tf.variable_scope(scope, reuse=reuse):
             self.global_step = tf.get_variable(name="global_step", shape=[], dtype=tf.int32,
@@ -462,8 +463,32 @@ class AIRModel:
                 grads, variables = zip(*optimizer.compute_gradients(self.loss))
 
                 if self.gradient_clipping_norm is not None:
+                    for i in range(len(grads)):
+                        # summaries of the original gradient values
+                        self.grad_summaries.append(tf.summary.histogram(
+                            variables[i].name + "_grad_original", grads[i]
+                        ))
+                        self.grad_summaries.append(tf.summary.scalar(
+                            variables[i].name + "_grad_original_norm", tf.norm(grads[i])
+                        ))
+                        self.grad_summaries.append(tf.summary.scalar(
+                            variables[i].name + "_grad_original_avg", tf.reduce_mean(grads[i])
+                        ))
+
                     # gradient clipping by global norm, if required
                     grads = tf.clip_by_global_norm(grads, self.gradient_clipping_norm)[0]
+
+                for i in range(len(grads)):
+                    # summaries of the applied (maybe clipped) gradients
+                    self.grad_summaries.append(tf.summary.histogram(
+                        variables[i].name + "_grad_applied", grads[i]
+                    ))
+                    self.grad_summaries.append(tf.summary.scalar(
+                        variables[i].name + "_grad_applied_norm", tf.norm(grads[i])
+                    ))
+                    self.grad_summaries.append(tf.summary.scalar(
+                        variables[i].name + "_grad_applied_avg", tf.reduce_mean(grads[i])
+                    ))
 
                 grads_and_vars = list(zip(grads, variables))
 

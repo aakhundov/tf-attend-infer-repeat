@@ -17,6 +17,7 @@ CANVAS_SIZE = 50
 NUM_SUMMARIES_EACH_ITERATIONS = 50
 VAR_SUMMARIES_EACH_ITERATIONS = 500
 IMG_SUMMARIES_EACH_ITERATIONS = 1000
+GRAD_SUMMARIES_EACH_ITERATIONS = 100
 SAVE_PARAMS_EACH_ITERATIONS = 10000
 NUM_IMAGES_TO_SAVE = 60
 
@@ -113,28 +114,25 @@ with tf.Session(config=config) as sess:
     writer = tf.summary.FileWriter(SUMMARIES_FOLDER, sess.graph)
     saver = tf.train.Saver(max_to_keep=10000)
 
-    # saving initial (randomly initialized) parameter values
-    saver.save(sess, MODELS_FOLDER + "air-model", global_step=0)
-
-    # all summaries are fetched from test (not training) model
+    # diagnostic summaries are fetched from the test model
     num_summaries = tf.summary.merge(test_model.num_summaries)
     var_summaries = tf.summary.merge(test_model.var_summaries)
     img_summaries = tf.summary.merge(test_model.img_summaries)
+
+    # gradient summaries are fetched from the training model
+    grad_summaries = tf.summary.merge(train_model.grad_summaries)
 
     # reading the test dataset, to be used with test model for
     # computing all summaries throughout the training process
     test_images, test_num_digits = read_test_data(TEST_DATA_FILE)
 
     try:
+        # beginning with step = 0 to capture all summaries
+        # and save the initial values of the model parameters
+        # before the actual training process has started
+        step = 0
+
         while True:
-            # training step
-            _, loss, accuracy, step = sess.run([
-                train_model.training, train_model.loss,
-                train_model.accuracy, train_model.global_step
-            ])
-
-            print("iteration {}\tloss {:.3f}\taccuracy {:.2f}".format(step, loss, accuracy))
-
             # saving summaries with configured frequency:
             # it is assumed that frequencies of more rare
             # summaries are divisible by more frequent ones
@@ -177,6 +175,25 @@ with tf.Session(config=config) as sess:
                     sess, MODELS_FOLDER + "air-model",
                     global_step=step
                 )
+
+            # training step
+            if step % GRAD_SUMMARIES_EACH_ITERATIONS == 0:
+                # with gradient summaries
+                _, loss, accuracy, step, grad_sum = sess.run([
+                    train_model.training, train_model.loss,
+                    train_model.accuracy, train_model.global_step,
+                    grad_summaries
+                ])
+
+                writer.add_summary(grad_sum, step)
+            else:
+                # without gradient summaries
+                _, loss, accuracy, step = sess.run([
+                    train_model.training, train_model.loss,
+                    train_model.accuracy, train_model.global_step
+                ])
+
+            print("iteration {}\tloss {:.3f}\taccuracy {:.2f}".format(step, loss, accuracy))
 
     except tf.errors.OutOfRangeError:
         print()
