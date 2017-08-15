@@ -28,27 +28,34 @@ TEST_DATA_FILE = "multi_mnist_data/test.tfrecords"
 
 # parsing command-line arguments
 parser = argparse.ArgumentParser()
+parser.add_argument("-i", "--increment-results-folder", type=int, choices=[0, 1], default=1)
 parser.add_argument("-r", "--results-folder", default=DEFAULT_RESULTS_FOLDER)
 parser.add_argument("-o", "--overwrite-results", type=int, choices=[0, 1], default=0)
 parser.add_argument("-t", "--reader-threads", type=int, default=DEFAULT_READER_THREADS)
 args = parser.parse_args()
 
-MODELS_FOLDER = args.results_folder + "/models/"
-SUMMARIES_FOLDER = args.results_folder + "/summary/"
-SOURCE_FOLDER = args.results_folder + "/source/"
+RESULTS_FOLDER = args.results_folder
+if args.increment_results_folder:
+    i = 0
+    while os.path.exists(RESULTS_FOLDER + "/run_%s" % i):
+        i += 1
+    RESULTS_FOLDER = RESULTS_FOLDER + "/run_%s" % i
+MODELS_FOLDER = RESULTS_FOLDER + "/models/"
+SUMMARIES_FOLDER = RESULTS_FOLDER + "/summary/"
+SOURCE_FOLDER = RESULTS_FOLDER + "/source/"
 
 
 # removing existing results folder (with content), if configured so
 # otherwise, throwing an exception if the results folder exists
 if args.overwrite_results:
-    shutil.rmtree(args.results_folder, ignore_errors=True)
-elif os.path.exists(args.results_folder):
+    shutil.rmtree(RESULTS_FOLDER, ignore_errors=True)
+elif os.path.exists(RESULTS_FOLDER):
     raise Exception("The folder \"{0}\" already exists".format(
-        args.results_folder
+        RESULTS_FOLDER
     ))
 
 # creating result directories
-os.makedirs(args.results_folder)
+os.makedirs(RESULTS_FOLDER)
 os.makedirs(MODELS_FOLDER)
 os.makedirs(SUMMARIES_FOLDER)
 os.makedirs(SOURCE_FOLDER)
