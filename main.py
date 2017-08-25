@@ -34,19 +34,22 @@ parser.add_argument("-o", "--overwrite-results", type=int, choices=[0, 1], defau
 parser.add_argument("-t", "--reader-threads", type=int, default=DEFAULT_READER_THREADS)
 args = parser.parse_args()
 
+
+# removing existing results folder (with content), if configured so
+# otherwise, appending next available sequence # to the folder name
+if os.path.exists(args.results_folder):
+    if args.overwrite_results:
+        shutil.rmtree(args.results_folder, ignore_errors=True)
+    else:
+        folder, i = args.results_folder, 0
+        args.results_folder = "{}_{}".format(folder, i)
+        while os.path.exists(args.results_folder):
+            i += 1
+            args.results_folder = "{}_{}".format(folder, i)
+
 MODELS_FOLDER = args.results_folder + "/models/"
 SUMMARIES_FOLDER = args.results_folder + "/summary/"
 SOURCE_FOLDER = args.results_folder + "/source/"
-
-
-# removing existing results folder (with content), if configured so
-# otherwise, throwing an exception if the results folder exists
-if args.overwrite_results:
-    shutil.rmtree(args.results_folder, ignore_errors=True)
-elif os.path.exists(args.results_folder):
-    raise Exception("The folder \"{0}\" already exists".format(
-        args.results_folder
-    ))
 
 # creating result directories
 os.makedirs(args.results_folder)
@@ -56,7 +59,7 @@ os.makedirs(SOURCE_FOLDER)
 
 # creating a copy of the current version of *.py source files
 for file in [f for f in os.listdir(".") if f.endswith(".py")]:
-        shutil.copy(file, SOURCE_FOLDER + file)
+    shutil.copy(file, SOURCE_FOLDER + file)
 
 
 with tf.variable_scope("pipeline"):
