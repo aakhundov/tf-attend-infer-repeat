@@ -350,7 +350,7 @@ class AIRModel:
 
         with tf.variable_scope("rnn") as rnn_scope:
             # creating RNN cells and initial state
-            cell = rnn.BasicLSTMCell(self.lstm_units, reuse=rnn_scope.reuse)
+            cell = rnn.GRUCell(self.lstm_units, reuse=rnn_scope.reuse)
             rnn_init_state = cell.zero_state(
                 self.batch_size, self.input_images.dtype
             )
