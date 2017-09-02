@@ -1,12 +1,39 @@
 import os
+import argparse
 
 import numpy as np
+import scipy.ndimage as nd
+import matplotlib.pyplot as plt
 import tensorflow as tf
 
 from tensorflow.examples.tutorials.mnist import input_data
 
 
-def crop_bounds(image):
+def show_image(image):
+    plt.imshow(image, cmap="gray", vmin=0.0, vmax=1.0)
+    plt.show()
+
+
+def read_image(path, max_intensity):
+    image = nd.imread(path, mode="L")
+    image = np.asarray(image, dtype=np.float32) / 255.0
+    img_min, img_max = image.min(), image.max()
+
+    if img_min != img_max:
+        if img_min > 0.0:
+            image -= img_min
+        if img_max > 0.0:
+            image /= img_max
+        if max_intensity < 1.0:
+            image *= max_intensity
+    else:
+        if img_max > max_intensity:
+            image = np.ones_like(image) * max_intensity
+
+    return image
+
+
+def crop_non_empty(image):
     non_zero_row_ids = np.array(np.nonzero(np.sum(image, axis=0)))[0]
     non_zero_col_ids = np.array(np.nonzero(np.sum(image, axis=1)))[0]
     x_start, x_end = non_zero_row_ids[0], non_zero_row_ids[-1]
@@ -22,35 +49,72 @@ def overlaps(canvas, image, x, y):
     return not np.array_equal(np.maximum(image, window), image + window)
 
 
-def generate_multi_image(single_images, num_images, image_dim, canvas_dim):
-    placed_image_ids = []
-    placed_image_positions = []
-    placed_image_boxes = []
+def generate_multi_image(single_images, num_images, image_dim, canvas_dim, bg=None,
+                         min_w=1.0, max_w=1.0, min_h=1.0, max_h=1.0, min_ang=0.0, max_ang=0.0):
+    ready = False
+    while not ready:
+        canvas = np.zeros(
+            [canvas_dim, canvas_dim],
+            dtype=single_images[0].dtype
+        )
 
-    canvas = np.zeros(
-        [canvas_dim, canvas_dim],
-        dtype=single_images[0].dtype
-    )
+        placed_image_ids = []
+        placed_image_positions = []
+        placed_image_boxes = []
 
-    for i in range(num_images):
-        placed = False
-        while not placed:
-            idx = np.random.randint(len(single_images))
-            image = np.reshape(single_images[idx], [image_dim, image_dim])
-            cropped = crop_bounds(image)
-            h, w = cropped.shape
+        if num_digits == 0:
+            break
 
-            for attempt in range(10):
+        try:
+            for i in range(num_images):
+                idx = np.random.randint(len(single_images))
+                image = np.reshape(single_images[idx], [image_dim, image_dim])
+                image = crop_non_empty(image)
+
+                if min_w != 1.0 or max_w != 1.0 or min_h != 1.0 or max_h != 1.0:
+                    new_width = np.random.uniform(min_w, max_w)
+                    new_height = np.random.uniform(min_h, max_h)
+
+                    image = nd.affine_transform(
+                        image,
+                        matrix=np.array([[1.0 / new_height, 0.0], [0.0, 1.0 / new_width]]),
+                        output_shape=(int(image_dim * new_height), int(image_dim * new_width)),
+                        order=5
+                    )
+
+                    image = np.clip(image, 0.0, 1.0)
+                    image = np.where(image >= 0.05, image, np.zeros_like(image))
+                    image = crop_non_empty(image)
+
+                if min_ang != 0.0 or max_ang != 0.0:
+                    new_angle = np.random.uniform(min_ang, max_ang)
+
+                    image = nd.rotate(image, new_angle, order=5)
+
+                    image = np.clip(image, 0.0, 1.0)
+                    image = np.where(image >= 0.05, image, np.zeros_like(image))
+                    image = crop_non_empty(image)
+
+                h, w = image.shape
                 x = np.random.randint(canvas_dim - w)
                 y = np.random.randint(canvas_dim - h)
 
-                if not overlaps(canvas, cropped, x, y):
-                    canvas[y:y+h, x:x+w] += cropped
+                if overlaps(canvas, image, x, y):
+                    break
+                else:
+                    canvas[y:y+h, x:x+w] += image
+
                     placed_image_positions.extend([x, y])
                     placed_image_boxes.extend([w, h])
                     placed_image_ids.append(idx)
-                    placed = True
-                    break
+
+                    if i == num_images - 1:
+                        ready = True
+        except IndexError:
+            pass
+
+    if bg is not None:
+        canvas = np.clip(canvas + bg, 0.0, 1.0)
 
     return canvas, placed_image_ids, placed_image_positions, placed_image_boxes
 
@@ -139,16 +203,36 @@ def read_test_data(filename):
 
 if __name__ == "__main__":
 
-    MAX_DIGITS = 5
-    MAX_DIGITS_IN_COMMON = 2
-    IMAGES_PER_DIGIT = 20000
-    TEST_SET_SIZE = 1000
+    DEFAULT_MAX_DIGITS = 3
+    DEFAULT_MAX_IN_COMMON = 2
+    DEFAULT_IMAGES_PER_DIGIT = 20000
+    DEFAULT_TEST_SET_SIZE = 1000
 
     MNIST_FOLDER = "mnist_data/"
     MULTI_MNIST_FOLDER = "multi_mnist_data/"
 
+    CANVAS_SIZE = 50
+    IMAGE_SIZE = 28
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--max-digits", type=int, choices=list(range(7)), default=DEFAULT_MAX_DIGITS)
+    parser.add_argument("--max-in-common", type=int, choices=list(range(7)), default=DEFAULT_MAX_IN_COMMON)
+    parser.add_argument("--images-per-digit", type=int, default=DEFAULT_IMAGES_PER_DIGIT)
+    parser.add_argument("--test-set-size", type=int, default=DEFAULT_TEST_SET_SIZE)
+    parser.add_argument("--bg-path", default="")
+    parser.add_argument("--bg-max-intensity", type=float, default=1.0)
+    parser.add_argument("--min-width-scale", type=float, default=1.0)
+    parser.add_argument("--max-width-scale", type=float, default=1.0)
+    parser.add_argument("--min-height-scale", type=float, default=1.0)
+    parser.add_argument("--max-height-scale", type=float, default=1.0)
+    parser.add_argument("--min-rotation-angle", type=float, default=0.0)
+    parser.add_argument("--max-rotation-angle", type=float, default=0.0)
+    args = parser.parse_args()
+
     if not os.path.exists(MULTI_MNIST_FOLDER):
         os.makedirs(MULTI_MNIST_FOLDER)
+
+    background = read_image(args.bg_path, args.bg_max_intensity) if args.bg_path != "" else None
 
     dataset = input_data.read_data_sets(MNIST_FOLDER)
 
@@ -158,14 +242,19 @@ if __name__ == "__main__":
     np.random.seed(0)
 
     print()
-    for num_digits in range(MAX_DIGITS+1):
+    for num_digits in range(args.max_digits + 1):
         strata_images, strata_indices = [], []
         strata_positions, strata_boxes = [], []
         strata_labels = []
 
         print("Generating {} digit images... ".format(num_digits), end="", flush=True)
-        for item in range(IMAGES_PER_DIGIT):
-            img, ids, pos, box = generate_multi_image(dataset.train.images, num_digits, 28, 50)
+        for item in range(args.images_per_digit):
+            img, ids, pos, box = generate_multi_image(
+                dataset.train.images, num_digits, IMAGE_SIZE, CANVAS_SIZE, bg=background,
+                min_w=args.min_width_scale, max_w=args.max_width_scale,
+                min_h=args.min_height_scale, max_h=args.max_height_scale,
+                min_ang=args.min_rotation_angle, max_ang=args.max_rotation_angle
+            )
 
             strata_images.append(img)
             strata_indices.append(ids)
@@ -174,9 +263,9 @@ if __name__ == "__main__":
             strata_labels.append(list(dataset.train.labels[ids]))
         print("done")
 
-        strata_digits = [num_digits] * IMAGES_PER_DIGIT
+        strata_digits = [num_digits] * args.images_per_digit
 
-        if num_digits <= MAX_DIGITS_IN_COMMON:
+        if num_digits <= args.max_in_common:
             common_images.extend(strata_images)
             common_indices.extend(strata_indices)
             common_positions.extend(strata_positions)
@@ -189,22 +278,22 @@ if __name__ == "__main__":
                          strata_positions, strata_boxes, strata_labels, strata_digits)
         print("done")
 
-        if num_digits == MAX_DIGITS_IN_COMMON:
+        if num_digits == args.max_in_common:
             common_images, common_indices, common_positions, \
               common_boxes, common_labels, common_digits = shuffle_lists(
                 common_images, common_indices, common_positions, common_boxes, common_labels, common_digits
               )
 
-            print("Writing 0-{} digit images to common file... ".format(MAX_DIGITS_IN_COMMON), end="", flush=True)
-            write_to_records(MULTI_MNIST_FOLDER + "common", 
-                             common_images[TEST_SET_SIZE:], common_indices[TEST_SET_SIZE:],
-                             common_positions[TEST_SET_SIZE:], common_boxes[TEST_SET_SIZE:], 
-                             common_labels[TEST_SET_SIZE:], common_digits[TEST_SET_SIZE:])
+            print("Writing 0-{} digit images to common file... ".format(args.max_in_common), end="", flush=True)
+            write_to_records(MULTI_MNIST_FOLDER + "common",
+                             common_images[args.test_set_size:], common_indices[args.test_set_size:],
+                             common_positions[args.test_set_size:], common_boxes[args.test_set_size:],
+                             common_labels[args.test_set_size:], common_digits[args.test_set_size:])
             print("done")
 
-            print("Writing 0-{} digit images to test file... ".format(MAX_DIGITS_IN_COMMON), end="", flush=True)
-            write_to_records(MULTI_MNIST_FOLDER + "test", 
-                             common_images[:TEST_SET_SIZE], common_indices[:TEST_SET_SIZE],
-                             common_positions[:TEST_SET_SIZE], common_boxes[:TEST_SET_SIZE],
-                             common_labels[:TEST_SET_SIZE], common_digits[:TEST_SET_SIZE])
+            print("Writing 0-{} digit images to test file... ".format(args.max_in_common), end="", flush=True)
+            write_to_records(MULTI_MNIST_FOLDER + "test",
+                             common_images[:args.test_set_size], common_indices[:args.test_set_size],
+                             common_positions[:args.test_set_size], common_boxes[:args.test_set_size],
+                             common_labels[:args.test_set_size], common_digits[:args.test_set_size])
             print("done")
