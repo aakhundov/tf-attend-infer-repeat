@@ -270,7 +270,7 @@ class AIRModel:
                     z_pres_log_odds = tf.squeeze(layers.fully_connected(outputs, 1, activation_fn=None, scope=scope))
                 with tf.variable_scope("gumbel"):
                     z_pres = gumbel_softmax_binary(z_pres_log_odds, self.gumbel_temperature, hard=True)
-                    z_pres_prob = tf.exp(z_pres_log_odds) / (1.0 + tf.exp(z_pres_log_odds))
+                    z_pres_prob = tf.nn.sigmoid(z_pres_log_odds)
                     z_pres_probs_ta = z_pres_probs_ta.write(z_pres_probs_ta.size(), z_pres_prob)
 
             with tf.variable_scope("loss/z_pres_kl"):
