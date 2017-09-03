@@ -464,6 +464,8 @@ class AIRModel:
 
                 if self.gradient_clipping_norm is not None:
                     for i in range(len(grads)):
+                        if grads[i] is None:
+                            continue
                         # summaries of the original gradient values
                         self.grad_summaries.append(tf.summary.histogram(
                             variables[i].name + "_grad_original", grads[i]
@@ -479,6 +481,8 @@ class AIRModel:
                     grads = tf.clip_by_global_norm(grads, self.gradient_clipping_norm)[0]
 
                 for i in range(len(grads)):
+                    if grads[i] is None:
+                        continue
                     # summaries of the applied (maybe clipped) gradients
                     self.grad_summaries.append(tf.summary.histogram(
                         variables[i].name + "_grad_applied", grads[i]
