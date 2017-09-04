@@ -97,20 +97,29 @@ class AIRModel:
 
     @staticmethod
     def _draw_colored_bounding_boxes(images, boxes, steps):
-        channels = []
+        channels = [images, images, images]
 
-        for c in range(3):
-            # c-th colored bounding box with the color
-            # corresponding to c-th channel (R, G, or B)
-            channel_box = tf.expand_dims(boxes[:, c, :], 1)
+        for s in range(3):
+            # empty canvas with s-th bounding box
+            step_box = tf.expand_dims(boxes[:, s, :, :], 3)
 
-            # drawing the box only if there was c-th
-            # step in a particular image in the batch
-            channels.append(tf.where(
-                tf.greater(steps, c),
-                tf.image.draw_bounding_boxes(images, channel_box),    # images with a box
-                images                                                # original images (without a box)
-            ))
+            for c in range(3):
+                if s == c:
+                    # adding the box to c-th channel
+                    # if the number of attention steps is greater than s
+                    channels[c] = tf.where(
+                        tf.greater(steps, s),
+                        tf.minimum(channels[c] + step_box, tf.ones_like(images)),
+                        channels[c]
+                    )
+                else:
+                    # subtracting the box from channels other than c-th
+                    # if the number of attention steps is greater than s
+                    channels[c] = tf.where(
+                        tf.greater(steps, s),
+                        tf.maximum(channels[c] - step_box, tf.zeros_like(images)),
+                        channels[c]
+                    )
 
         # concatenating all three channels to obtain
         # potentially three R, G, and B bounding boxes
@@ -141,28 +150,31 @@ class AIRModel:
         )
 
     def _summarize_by_step(self, tensor, steps, name, one_more_step=False, all_steps=False):
-        for i in range(self.max_steps):
-            if all_steps:
-                # summarizing the entire (i+1)-st step without
-                # differentiating between actual step counts
-                self._summarize_by_digit_count(
-                    tensor[:, i], self.target_num_digits,
-                    name + "_" + str(i+1) + "_step"
-                )
-            else:
-                # considering one more step if required by one_more_step=True
-                # by subtracting 1 from loop variable i (e.g. 0 steps > -1)
-                mask = tf.greater(steps, i - (1 if one_more_step else 0))
+        try:
+            for i in range(self.max_steps):
+                if all_steps:
+                    # summarizing the entire (i+1)-st step without
+                    # differentiating between actual step counts
+                    self._summarize_by_digit_count(
+                        tensor[:, i], self.target_num_digits,
+                        name + "_" + str(i+1) + "_step"
+                    )
+                else:
+                    # considering one more step if required by one_more_step=True
+                    # by subtracting 1 from loop variable i (e.g. 0 steps > -1)
+                    mask = tf.greater(steps, i - (1 if one_more_step else 0))
 
-                # summarizing (i+1)-st step only for those
-                # batch items that actually had (i+1)-st step
-                self._summarize_by_digit_count(
-                    tf.boolean_mask(tensor[:, i], mask),
-                    tf.boolean_mask(self.target_num_digits, mask),
-                    name + "_" + str(i+1) + "_step"
-                )
+                    # summarizing (i+1)-st step only for those
+                    # batch items that actually had (i+1)-st step
+                    self._summarize_by_digit_count(
+                        tf.boolean_mask(tensor[:, i], mask),
+                        tf.boolean_mask(self.target_num_digits, mask),
+                        name + "_" + str(i+1) + "_step"
+                    )
+        except Exception as ex:
+            print("Warning:", ex)
 
-    def _visualize_reconstructions(self, original, reconstruction, scales, shifts, steps, zoom):
+    def _visualize_reconstructions(self, original, reconstruction, st_back, steps, zoom):
         # enlarging the original images
         large_original = tf.image.resize_images(
             tf.reshape(original, [-1, self.canvas_size, self.canvas_size, 1]),
@@ -175,12 +187,35 @@ class AIRModel:
             [zoom * self.canvas_size, zoom * self.canvas_size]
         )
 
-        # computing the bounding boxes
-        # from inferred scales and shifts
-        size = scales[:, :, 0]
-        left = (1.0 + shifts[:, :, 0] - size) / 2.0
-        top = (1.0 + shifts[:, :, 1] - size) / 2.0
-        boxes = tf.stack([top, left, top+size, left+size], axis=2)
+        # drawing the attention windows
+        # using backward ST matrices
+        num_images = tf.shape(original)[0]
+        boxes = tf.reshape(
+            tf.clip_by_value(
+                transformer(
+                    tf.expand_dims(
+                        tf.image.draw_bounding_boxes(
+                            tf.zeros(
+                                [num_images * self.max_steps, self.windows_size, self.windows_size, 1],
+                                dtype=reconstruction.dtype
+                            ),
+                            tf.tile(
+                                [[[0.0, 0.0, 1.0, 1.0]]],
+                                [num_images * self.max_steps, 1, 1]
+                            )
+                        ), 3
+                    ), st_back, [zoom * self.canvas_size, zoom * self.canvas_size]
+                ), 0.0, 1.0
+            ), [num_images, self.max_steps, zoom * self.canvas_size, zoom * self.canvas_size]
+        )
+
+        # sharpening the borders
+        # of the attention windows
+        boxes = tf.where(
+            tf.greater(boxes, 0.01),
+            tf.ones_like(boxes),
+            tf.zeros_like(boxes)
+        )
 
         # concatenating resulting original and reconstructed images with
         # bounding boxes drawn on them and a thin white stripe between them
@@ -202,7 +237,8 @@ class AIRModel:
         def body(step, not_finished, prev_state,
                  running_recon, running_loss, running_digits,
                  scales_ta, shifts_ta, z_pres_probs_ta,
-                 z_pres_kls_ta, scale_kls_ta, shift_kls_ta, vae_kls_ta):
+                 z_pres_kls_ta, scale_kls_ta, shift_kls_ta, vae_kls_ta,
+                 st_backward_ta):
 
             with tf.variable_scope("lstm") as scope:
                 # RNN time step
@@ -257,6 +293,8 @@ class AIRModel:
                     tf.concat([tf.stack([1.0 / s, tf.zeros_like(s)], axis=1), tf.expand_dims(-x / s, 1)], axis=1),
                     tf.concat([tf.stack([tf.zeros_like(s), 1.0 / s], axis=1), tf.expand_dims(-y / s, 1)], axis=1),
                 ], axis=1)
+
+                st_backward_ta = st_backward_ta.write(st_backward_ta.size(), theta_recon)
 
                 # ST backward transformation: window -> canvas
                 window_recon = tf.squeeze(transformer(
@@ -346,7 +384,8 @@ class AIRModel:
             return step + 1, not_finished, next_state, \
                 running_recon, running_loss, running_digits, \
                 scales_ta, shifts_ta, z_pres_probs_ta, \
-                z_pres_kls_ta, scale_kls_ta, shift_kls_ta, vae_kls_ta
+                z_pres_kls_ta, scale_kls_ta, shift_kls_ta, vae_kls_ta, \
+                st_backward_ta
 
         with tf.variable_scope("rnn") as rnn_scope:
             # creating RNN cells and initial state
@@ -357,7 +396,7 @@ class AIRModel:
 
             # RNN while_loop with variable number of steps for each batch item
             _, _, _, reconstruction, loss, self.rec_num_digits, scales, shifts, \
-                z_pres_probs, z_pres_kls, scale_kls, shift_kls, vae_kls = tf.while_loop(
+                z_pres_probs, z_pres_kls, scale_kls, shift_kls, vae_kls, st_backward = tf.while_loop(
                     cond, body, [
                         tf.constant(0),                                 # RNN time step, initially zero
                         tf.fill([self.batch_size], 1.0),                # "not_finished" tensor, 1 - not finished
@@ -371,13 +410,15 @@ class AIRModel:
                         tf.TensorArray(dtype=tf.float32, size=0, dynamic_size=True),   # z_pres KL-divergence
                         tf.TensorArray(dtype=tf.float32, size=0, dynamic_size=True),   # scale KL-divergence
                         tf.TensorArray(dtype=tf.float32, size=0, dynamic_size=True),   # shift KL-divergence
-                        tf.TensorArray(dtype=tf.float32, size=0, dynamic_size=True)    # VAE KL-divergence
+                        tf.TensorArray(dtype=tf.float32, size=0, dynamic_size=True),   # VAE KL-divergence
+                        tf.TensorArray(dtype=tf.float32, size=0, dynamic_size=True)    # backward ST matrices
                     ]
                 )
 
         # transposing contents of TensorArray's fetched from while_loop iterations
         self.rec_scales = tf.transpose(scales.stack(), (1, 0, 2), name="rec_scales")
         self.rec_shifts = tf.transpose(shifts.stack(), (1, 0, 2), name="rec_shifts")
+        self.rec_st_back = tf.transpose(st_backward.stack(), (1, 0, 2, 3), name="rec_st_back")
         self.z_pres_probs = tf.transpose(z_pres_probs.stack(), name="z_pres_probs")
         self.z_pres_kls = tf.transpose(z_pres_kls.stack(), name="z_pres_kls")
         self.scale_kls = tf.transpose(scale_kls.stack(), name="scale_kls")
@@ -438,8 +479,7 @@ class AIRModel:
                     self._visualize_reconstructions(
                         self.input_images[:self.num_summary_images],
                         self.reconstruction[:self.num_summary_images],
-                        self.rec_scales[:self.num_summary_images],
-                        self.rec_shifts[:self.num_summary_images],
+                        self.rec_st_back[:self.num_summary_images],
                         self.rec_num_digits[:self.num_summary_images],
                         zoom=2
                     ),
