@@ -14,6 +14,7 @@ class AIRModel:
                  vae_latent_dimensions=50, vae_recognition_units=(512, 256), vae_generative_units=(256, 512),
                  scale_prior_mean=-1.0, scale_prior_variance=0.1, shift_prior_mean=0.0, shift_prior_variance=1.0,
                  vae_prior_mean=0.0, vae_prior_variance=1.0, vae_likelihood_std=0.3,
+                 rot_prior_mean=0.0, rot_prior_variance=0.1,
                  z_pres_prior=0.01, gumbel_temperature=1.0, learning_rate=1e-4, gradient_clipping_norm=10.0,
                  num_summary_images=12, train=False, reuse=False, scope="air",
                  annealing_schedules=None):
@@ -36,9 +37,12 @@ class AIRModel:
         self.scale_prior_variance = scale_prior_variance
         self.shift_prior_mean = shift_prior_mean
         self.shift_prior_variance = shift_prior_variance
+        self.rot_prior_mean = rot_prior_mean
+        self.rot_prior_variance = rot_prior_variance
         self.vae_prior_mean = vae_prior_mean
         self.vae_prior_variance = vae_prior_variance
         self.vae_likelihood_std = vae_likelihood_std
+
 
         self.z_pres_prior = z_pres_prior
         self.gumbel_temperature = gumbel_temperature
@@ -58,6 +62,7 @@ class AIRModel:
 
             self.scale_prior_log_variance = tf.log(scale_prior_variance, name="scale_prior_log_variance")
             self.shift_prior_log_variance = tf.log(shift_prior_variance, name="shift_prior_log_variance")
+            self.rot_prior_log_variance = tf.log(rot_prior_variance, name="rot_prior_log_variance")
             self.vae_prior_log_variance = tf.log(vae_prior_variance, name="vae_prior_log_variance")
 
             if annealing_schedules is not None:
@@ -266,11 +271,22 @@ class AIRModel:
                 shifts_ta = shifts_ta.write(shifts_ta.size(), shift)
                 x, y = shift[:, 0], shift[:, 1]
 
+            with tf.variable_scope("rotation"):
+                # sampling scale
+                with tf.variable_scope("mean") as scope:
+                    rot_mean = layers.fully_connected(outputs, 1, activation_fn=None, scope=scope)
+                with tf.variable_scope("log_variance") as scope:
+                    rot_log_variance = layers.fully_connected(outputs, 1, activation_fn=None, scope=scope)
+                rot_variance = tf.exp(rot_log_variance)
+                rot = tf.nn.tanh(self._sample_from_mvn(rot_mean, rot_variance)) * 45.0
+                # transform to radians
+                rot = tf.squeeze(rot) * (3.1415926536 / 180.0)
+
             with tf.variable_scope("st_forward"):
                 # ST: theta of forward transformation
                 theta = tf.stack([
-                    tf.concat([tf.stack([s, tf.zeros_like(s)], axis=1), tf.expand_dims(x, 1)], axis=1),
-                    tf.concat([tf.stack([tf.zeros_like(s), s], axis=1), tf.expand_dims(y, 1)], axis=1),
+                    tf.concat([tf.stack([s * tf.cos(rot), - s * tf.sin(rot)], axis=1), tf.expand_dims(x, 1)], axis=1),
+                    tf.concat([tf.stack([s * tf.sin(rot), s * tf.cos(rot)], axis=1), tf.expand_dims(y, 1)], axis=1),
                 ], axis=1)
 
                 # ST forward transformation: canvas -> window
@@ -290,9 +306,10 @@ class AIRModel:
             with tf.variable_scope("st_backward"):
                 # ST: theta of backward transformation
                 theta_recon = tf.stack([
-                    tf.concat([tf.stack([1.0 / s, tf.zeros_like(s)], axis=1), tf.expand_dims(-x / s, 1)], axis=1),
-                    tf.concat([tf.stack([tf.zeros_like(s), 1.0 / s], axis=1), tf.expand_dims(-y / s, 1)], axis=1),
+                    tf.concat([tf.stack([1.0 / s * tf.cos(rot), 1.0 / s * tf.sin(rot)], axis=1), tf.expand_dims(1.0 / s * (-x * tf.cos(rot) - y * tf.sin(rot)), 1)], axis=1),
+                    tf.concat([tf.stack([1.0 / s * -tf.sin(rot), 1.0 / s * tf.cos(rot)], axis=1), tf.expand_dims((1.0 / s *- y * tf.cos(rot) + x * tf.sin(rot)), 1)], axis=1),
                 ], axis=1)
+
 
                 st_backward_ta = st_backward_ta.write(st_backward_ta.size(), theta_recon)
 
@@ -367,6 +384,18 @@ class AIRModel:
                 shift_kls_ta = shift_kls_ta.write(shift_kls_ta.size(), shift_kl)
                 running_loss += shift_kl
 
+            with tf.variable_scope("loss/rot_kl"):
+                # scale KL-divergence
+                rot_kl = not_finished * (
+                    0.5 * tf.reduce_sum(
+                        self.rot_prior_log_variance - rot_log_variance -
+                        1.0 + rot_variance / self.rot_prior_variance +
+                        tf.square(rot_mean - self.rot_prior_mean) / self.rot_prior_variance, 1
+                    )
+                )
+                running_loss += rot_kl
+
+
             with tf.variable_scope("loss/VAE_kl"):
                 # VAE KL_DIVERGENCE
                 vae_kl = not_finished * (
@@ -402,7 +431,7 @@ class AIRModel:
             # Pooling Layer #1
             max_pool_1 = tf.layers.max_pooling2d(inputs=conv1, pool_size=[2, 2], strides=2)
 
-            # Convolutional Layer #2 and Pooling Layer #2
+            # Convolutional Layer #2
             conv2 = tf.layers.conv2d(
                 inputs=max_pool_1,
                 filters=num_filters,
@@ -410,18 +439,9 @@ class AIRModel:
                 padding="same",
                 activation=tf.nn.relu)
 
-            max_pool_2 = tf.layers.max_pooling2d(inputs=conv2, pool_size=[2, 2], strides=2)
+            # Flatten feature maps
+            flat = tf.reshape(conv2, [-1, 25 * 25 * num_filters])
 
-            # Convolutional Layer #3 and Pooling Layer #3
-            conv3 = tf.layers.conv2d(
-                inputs=max_pool_2,
-                filters=num_filters,
-                kernel_size=[5, 5],
-                padding="same",
-                activation=tf.nn.relu)
-
-            # Dense Layer
-            flat = tf.reshape(conv3, [-1, 12 * 12 * num_filters])
             self.input_images_cnn_output = flat
 
         with tf.variable_scope("rnn") as rnn_scope:
