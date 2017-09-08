@@ -242,7 +242,7 @@ class AIRModel:
 
             with tf.variable_scope("lstm") as scope:
                 # RNN time step
-                outputs, next_state = cell(self.input_images, prev_state, scope=scope)
+                outputs, next_state = cell(self.input_images_cnn_output, prev_state, scope=scope)
 
             with tf.variable_scope("scale"):
                 # sampling scale
@@ -386,6 +386,43 @@ class AIRModel:
                 scales_ta, shifts_ta, z_pres_probs_ta, \
                 z_pres_kls_ta, scale_kls_ta, shift_kls_ta, vae_kls_ta, \
                 st_backward_ta
+
+
+        with tf.variable_scope("cnn") as cnn_scope:  #
+            num_filters = 8
+            x = tf.reshape(self.input_images, [-1, 50, 50, 1])
+            # x = tf.layers.max_pooling2d(inputs=x, pool_size=[2, 2], strides=2)
+            conv1 = tf.layers.conv2d(inputs=x,
+                                     filters=num_filters,
+                                     kernel_size=[5, 5],
+                                     strides=(1, 1),
+                                     padding="same",
+                                     activation=tf.nn.relu)
+
+            # Pooling Layer #1
+            max_pool_1 = tf.layers.max_pooling2d(inputs=conv1, pool_size=[2, 2], strides=2)
+
+            # Convolutional Layer #2 and Pooling Layer #2
+            conv2 = tf.layers.conv2d(
+                inputs=max_pool_1,
+                filters=num_filters,
+                kernel_size=[5, 5],
+                padding="same",
+                activation=tf.nn.relu)
+
+            max_pool_2 = tf.layers.max_pooling2d(inputs=conv2, pool_size=[2, 2], strides=2)
+
+            # Convolutional Layer #3 and Pooling Layer #3
+            conv3 = tf.layers.conv2d(
+                inputs=max_pool_2,
+                filters=num_filters,
+                kernel_size=[5, 5],
+                padding="same",
+                activation=tf.nn.relu)
+
+            # Dense Layer
+            flat = tf.reshape(conv3, [-1, 12 * 12 * num_filters])
+            self.input_images_cnn_output = flat
 
         with tf.variable_scope("rnn") as rnn_scope:
             # creating RNN cells and initial state
