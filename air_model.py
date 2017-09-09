@@ -252,13 +252,13 @@ class AIRModel:
             with tf.variable_scope("scale"):
                 # sampling scale
                 with tf.variable_scope("mean") as scope:
-                    scale_mean = layers.fully_connected(outputs, 1, activation_fn=None, scope=scope)
+                    scale_mean = layers.fully_connected(outputs, 2, activation_fn=None, scope=scope)
                 with tf.variable_scope("log_variance") as scope:
-                    scale_log_variance = layers.fully_connected(outputs, 1, activation_fn=None, scope=scope)
+                    scale_log_variance = layers.fully_connected(outputs, 2, activation_fn=None, scope=scope)
                 scale_variance = tf.exp(scale_log_variance)
                 scale = tf.nn.sigmoid(self._sample_from_mvn(scale_mean, scale_variance))
                 scales_ta = scales_ta.write(scales_ta.size(), scale)
-                s = tf.squeeze(scale)
+                s_x, s_y = scale[:, 0], scale[:, 1]
 
             with tf.variable_scope("shift"):
                 # sampling shift
@@ -285,8 +285,8 @@ class AIRModel:
             with tf.variable_scope("st_forward"):
                 # ST: theta of forward transformation
                 theta = tf.stack([
-                    tf.concat([tf.stack([s * tf.cos(rot), - s * tf.sin(rot)], axis=1), tf.expand_dims(x, 1)], axis=1),
-                    tf.concat([tf.stack([s * tf.sin(rot), s * tf.cos(rot)], axis=1), tf.expand_dims(y, 1)], axis=1),
+                    tf.concat([tf.stack([s_x * tf.cos(rot), - s_y * tf.sin(rot)], axis=1), tf.expand_dims(x, 1)], axis=1),
+                    tf.concat([tf.stack([s_x * tf.sin(rot), s_y * tf.cos(rot)], axis=1), tf.expand_dims(y, 1)], axis=1),
                 ], axis=1)
 
                 # ST forward transformation: canvas -> window
@@ -306,8 +306,8 @@ class AIRModel:
             with tf.variable_scope("st_backward"):
                 # ST: theta of backward transformation
                 theta_recon = tf.stack([
-                    tf.concat([tf.stack([1.0 / s * tf.cos(rot), 1.0 / s * tf.sin(rot)], axis=1), tf.expand_dims(1.0 / s * (-x * tf.cos(rot) - y * tf.sin(rot)), 1)], axis=1),
-                    tf.concat([tf.stack([1.0 / s * -tf.sin(rot), 1.0 / s * tf.cos(rot)], axis=1), tf.expand_dims((1.0 / s *- y * tf.cos(rot) + x * tf.sin(rot)), 1)], axis=1),
+                    tf.concat([tf.stack([1.0 / s_x * tf.cos(rot), 1.0 / s_x * tf.sin(rot)], axis=1), tf.expand_dims(1.0 / s_x * (-x * tf.cos(rot) - y * tf.sin(rot)), 1)], axis=1),
+                    tf.concat([tf.stack([1.0 / s_y * -tf.sin(rot), 1.0 / s_y * tf.cos(rot)], axis=1), tf.expand_dims((1.0 / s_y *- y * tf.cos(rot) + x * tf.sin(rot)), 1)], axis=1),
                 ], axis=1)
 
 
