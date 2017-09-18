@@ -91,12 +91,12 @@ for i in range(2):
             vae_latent_dimensions=50, vae_recognition_units=(512, 256), vae_generative_units=(256, 512),
             scale_prior_mean=-1.0, scale_prior_variance=0.1, shift_prior_mean=0.0, shift_prior_variance=1.0,
             vae_prior_mean=0.0, vae_prior_variance=1.0, vae_likelihood_std=0.3,
-            z_pres_prior=1e-1, gumbel_temperature=10.0, learning_rate=1e-3, gradient_clipping_norm=100.0,
+            z_pres_prior=1e-1, gumbel_temperature=10.0, learning_rate=1e-3, gradient_clipping_norm=10.0,
             num_summary_images=NUM_IMAGES_TO_SAVE, train=(i == 0), reuse=(i == 1), scope="air",
             annealing_schedules={
-                "z_pres_prior": {"init": 1e-1, "min": 1e-9, "factor": 0.5, "iters": 1000},
+                "z_pres_prior": {"init": 1e-1, "min": 1e-5, "factor": 0.8, "iters": 1000},
                 "gumbel_temperature": {"init": 10.0, "min": 0.1, "factor": 0.8, "iters": 1000},
-                "learning_rate": {"init": 1e-3, "min": 1e-4, "factor": 0.5, "iters": 1000}
+                # "learning_rate": {"init": 1e-3, "min": 1e-4, "factor": 0.5, "iters": 1000}
             }
         )
     )
