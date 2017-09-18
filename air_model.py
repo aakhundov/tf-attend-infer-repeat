@@ -246,10 +246,16 @@ class AIRModel:
 
             with tf.variable_scope("scale"):
                 # sampling scale
-                with tf.variable_scope("mean") as scope:
-                    scale_mean = layers.fully_connected(outputs, 1, activation_fn=None, scope=scope)
-                with tf.variable_scope("log_variance") as scope:
-                    scale_log_variance = layers.fully_connected(outputs, 1, activation_fn=None, scope=scope)
+                with tf.variable_scope("mean"):
+                    with tf.variable_scope("hidden") as scope:
+                        hidden = layers.fully_connected(outputs, 64, scope=scope)
+                    with tf.variable_scope("output") as scope:
+                        scale_mean = layers.fully_connected(hidden, 1, activation_fn=None, scope=scope)
+                with tf.variable_scope("log_variance"):
+                    with tf.variable_scope("hidden") as scope:
+                        hidden = layers.fully_connected(outputs, 64, scope=scope)
+                    with tf.variable_scope("output") as scope:
+                        scale_log_variance = layers.fully_connected(hidden, 1, activation_fn=None, scope=scope)
                 scale_variance = tf.exp(scale_log_variance)
                 scale = tf.nn.sigmoid(self._sample_from_mvn(scale_mean, scale_variance))
                 scales_ta = scales_ta.write(scales_ta.size(), scale)
@@ -257,10 +263,16 @@ class AIRModel:
 
             with tf.variable_scope("shift"):
                 # sampling shift
-                with tf.variable_scope("mean") as scope:
-                    shift_mean = layers.fully_connected(outputs, 2, activation_fn=None, scope=scope)
-                with tf.variable_scope("log_variance") as scope:
-                    shift_log_variance = layers.fully_connected(outputs, 2, activation_fn=None, scope=scope)
+                with tf.variable_scope("mean"):
+                    with tf.variable_scope("hidden") as scope:
+                        hidden = layers.fully_connected(outputs, 64, scope=scope)
+                    with tf.variable_scope("output") as scope:
+                        shift_mean = layers.fully_connected(hidden, 2, activation_fn=None, scope=scope)
+                with tf.variable_scope("log_variance"):
+                    with tf.variable_scope("hidden") as scope:
+                        hidden = layers.fully_connected(outputs, 64, scope=scope)
+                    with tf.variable_scope("output") as scope:
+                        shift_log_variance = layers.fully_connected(hidden, 2, activation_fn=None, scope=scope)
                 shift_variance = tf.exp(shift_log_variance)
                 shift = tf.nn.tanh(self._sample_from_mvn(shift_mean, shift_variance))
                 shifts_ta = shifts_ta.write(shifts_ta.size(), shift)
@@ -304,8 +316,11 @@ class AIRModel:
 
             with tf.variable_scope("z_pres"):
                 # sampling z_pres flag (1 - more digits, 0 - no more digits)
-                with tf.variable_scope("log_odds") as scope:
-                    z_pres_log_odds = tf.squeeze(layers.fully_connected(outputs, 1, activation_fn=None, scope=scope))
+                with tf.variable_scope("log_odds"):
+                    with tf.variable_scope("hidden") as scope:
+                        hidden = layers.fully_connected(outputs, 64, scope=scope)
+                    with tf.variable_scope("output") as scope:
+                        z_pres_log_odds = tf.squeeze(layers.fully_connected(hidden, 1, activation_fn=None, scope=scope))
                 with tf.variable_scope("gumbel"):
                     z_pres = gumbel_softmax_binary(z_pres_log_odds, self.gumbel_temperature, hard=True)
                     z_pres_prob = tf.nn.sigmoid(z_pres_log_odds)
