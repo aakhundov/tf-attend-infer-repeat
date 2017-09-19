@@ -150,29 +150,30 @@ class AIRModel:
         )
 
     def _summarize_by_step(self, tensor, steps, name, one_more_step=False, all_steps=False):
-        try:
-            for i in range(self.max_steps):
-                if all_steps:
-                    # summarizing the entire (i+1)-st step without
-                    # differentiating between actual step counts
-                    self._summarize_by_digit_count(
-                        tensor[:, i], self.target_num_digits,
-                        name + "_" + str(i+1) + "_step"
-                    )
-                else:
-                    # considering one more step if required by one_more_step=True
-                    # by subtracting 1 from loop variable i (e.g. 0 steps > -1)
-                    mask = tf.greater(steps, i - (1 if one_more_step else 0))
+        # padding (if required) the number of rows in the tensor
+        # up to self.max_steps to avoid possible "out of range" errors
+        tensor = tf.pad(tensor, [[0, 0], [0, self.max_steps - tf.shape(tensor)[1]]])
 
-                    # summarizing (i+1)-st step only for those
-                    # batch items that actually had (i+1)-st step
-                    self._summarize_by_digit_count(
-                        tf.boolean_mask(tensor[:, i], mask),
-                        tf.boolean_mask(self.target_num_digits, mask),
-                        name + "_" + str(i+1) + "_step"
-                    )
-        except Exception as ex:
-            print("Warning:", ex)
+        for i in range(self.max_steps):
+            if all_steps:
+                # summarizing the entire (i+1)-st step without
+                # differentiating between actual step counts
+                self._summarize_by_digit_count(
+                    tensor[:, i], self.target_num_digits,
+                    name + "_" + str(i+1) + "_step"
+                )
+            else:
+                # considering one more step if required by one_more_step=True
+                # by subtracting 1 from loop variable i (e.g. 0 steps > -1)
+                mask = tf.greater(steps, i - (1 if one_more_step else 0))
+
+                # summarizing (i+1)-st step only for those
+                # batch items that actually had (i+1)-st step
+                self._summarize_by_digit_count(
+                    tf.boolean_mask(tensor[:, i], mask),
+                    tf.boolean_mask(self.target_num_digits, mask),
+                    name + "_" + str(i+1) + "_step"
+                )
 
     def _visualize_reconstructions(self, original, reconstruction, st_back, steps, zoom):
         # enlarging the original images
