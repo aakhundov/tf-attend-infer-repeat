@@ -3,13 +3,13 @@ import argparse
 
 import numpy as np
 import scipy.ndimage as nd
-import matplotlib.pyplot as plt
 import tensorflow as tf
 
 from tensorflow.examples.tutorials.mnist import input_data
 
 
 def show_image(image):
+    import matplotlib.pyplot as plt
     plt.imshow(image, cmap="gray", vmin=0.0, vmax=1.0)
     plt.show()
 
