@@ -42,15 +42,23 @@ def crop_non_empty(image):
     return image[y_start:y_end+1, x_start:x_end+1]
 
 
-def overlaps(canvas, image, x, y):
-    h, w = image.shape
-    window = canvas[y:y+h, x:x+w]
+def overlaps(x, y, w, h, positions, boxes, gap):
+    for i in range(len(positions) // 2):
+        p, b = positions[i*2:(i+1)*2], boxes[i*2:(i+1)*2]
+        l1x, l1y, r1x, r1y = x-gap, y-gap, x+w+gap, y+h+gap
+        l2x, l2y, r2x, r2y = p[0], p[1], p[0]+b[0], p[1]+b[1]
 
-    return not np.array_equal(np.maximum(image, window), image + window)
+        if l1x <= r2x and l2x <= r1x:
+            return True
+        if l1y >= r2y and l2y >= r1y:
+            return True
+
+    return False
 
 
 def generate_multi_image(single_images, num_images, image_dim, canvas_dim, bg=None,
-                         min_w=1.0, max_w=1.0, min_h=1.0, max_h=1.0, min_ang=0.0, max_ang=0.0):
+                         min_w=1.0, max_w=1.0, min_h=1.0, max_h=1.0, min_ang=0.0, max_ang=0.0,
+                         gap=0, margin=0):
     ready = False
     while not ready:
         canvas = np.zeros(
@@ -96,12 +104,20 @@ def generate_multi_image(single_images, num_images, image_dim, canvas_dim, bg=No
                     image = crop_non_empty(image)
 
                 h, w = image.shape
-                x = np.random.randint(canvas_dim - w)
-                y = np.random.randint(canvas_dim - h)
+                position_find_attempts = 0
+                position_found = False
 
-                if overlaps(canvas, image, x, y):
-                    break
-                else:
+                while position_find_attempts < 100:
+                    x = np.random.randint(margin, canvas_dim - w - margin)
+                    y = np.random.randint(margin, canvas_dim - h - margin)
+
+                    if i == 0 or not overlaps(x, y, w, h, placed_image_positions, placed_image_boxes, gap):
+                        position_found = True
+                        break
+
+                    position_find_attempts += 1
+
+                if position_found:
                     canvas[y:y+h, x:x+w] += image
 
                     placed_image_positions.extend([x, y])
@@ -110,6 +126,9 @@ def generate_multi_image(single_images, num_images, image_dim, canvas_dim, bg=No
 
                     if i == num_images - 1:
                         ready = True
+                else:
+                    break
+
         except IndexError:
             pass
 
@@ -219,6 +238,8 @@ if __name__ == "__main__":
     parser.add_argument("--max-in-common", type=int, choices=list(range(7)), default=DEFAULT_MAX_IN_COMMON)
     parser.add_argument("--images-per-digit", type=int, default=DEFAULT_IMAGES_PER_DIGIT)
     parser.add_argument("--test-set-size", type=int, default=DEFAULT_TEST_SET_SIZE)
+    parser.add_argument("--digit-box-gap", type=int, default=2)
+    parser.add_argument("--canvas-margin", type=int, default=2)
     parser.add_argument("--bg-path", default="")
     parser.add_argument("--bg-max-intensity", type=float, default=1.0)
     parser.add_argument("--min-width-scale", type=float, default=1.0)
@@ -241,19 +262,20 @@ if __name__ == "__main__":
 
     np.random.seed(0)
 
-    print()
     for num_digits in range(args.max_digits + 1):
         strata_images, strata_indices = [], []
         strata_positions, strata_boxes = [], []
         strata_labels = []
 
-        print("Generating {} digit images... ".format(num_digits), end="", flush=True)
+        print()
+        print("Generating {} digit images...".format(num_digits))
         for item in range(args.images_per_digit):
             img, ids, pos, box = generate_multi_image(
                 dataset.train.images, num_digits, IMAGE_SIZE, CANVAS_SIZE, bg=background,
                 min_w=args.min_width_scale, max_w=args.max_width_scale,
                 min_h=args.min_height_scale, max_h=args.max_height_scale,
-                min_ang=args.min_rotation_angle, max_ang=args.max_rotation_angle
+                min_ang=args.min_rotation_angle, max_ang=args.max_rotation_angle,
+                gap=args.digit_box_gap, margin=args.canvas_margin
             )
 
             strata_images.append(img)
@@ -261,7 +283,10 @@ if __name__ == "__main__":
             strata_positions.append(pos)
             strata_boxes.append(box)
             strata_labels.append(list(dataset.train.labels[ids]))
-        print("done")
+
+            if (item + 1) % 1000 == 0:
+                print("{0} done".format(item + 1))
+        print()
 
         strata_digits = [num_digits] * args.images_per_digit
 
