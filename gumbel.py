@@ -35,10 +35,27 @@ def concrete_binary_sample(log_odds, temperature, hard=False, eps=10e-10):
     return y, sig_y
 
 
-def concrete_binary_kl_mc(y, log_odds1, temperature1, log_odds2, temperature2, eps=10e-10):
-    temp1_y, temp2_y = temperature1 * y, temperature2 * y
+def concrete_binary_pre_sigmoid_sample(log_odds, temperature, eps=10e-10):
+    count = tf.shape(log_odds)[0]
 
-    log1 = tf.log(temperature1 + eps) - temp1_y + log_odds1 - 2.0 * tf.log(1.0 + tf.exp(-temp1_y + log_odds1) + eps)
-    log2 = tf.log(temperature2 + eps) - temp2_y + log_odds2 - 2.0 * tf.log(1.0 + tf.exp(-temp2_y + log_odds2) + eps)
+    u = tf.random_uniform([count], minval=0, maxval=1)
+    noise = tf.log(u + eps) - tf.log(1.0 - u + eps)
+    y = (log_odds + noise) / temperature
 
-    return log1 - log2
+    return y
+
+
+def concrete_binary_kl_mc_sample(y,
+                                 prior_log_odds, prior_temperature,
+                                 posterior_log_odds, posterior_temperature,
+                                 eps=10e-10):
+
+    y_times_prior_temp = y * prior_temperature
+    log_prior = tf.log(prior_temperature + eps) - y_times_prior_temp + prior_log_odds - \
+        2.0 * tf.log(1.0 + tf.exp(-y_times_prior_temp + prior_log_odds) + eps)
+
+    y_times_posterior_temp = y * posterior_temperature
+    log_posterior = tf.log(posterior_temperature + eps) - y_times_posterior_temp + posterior_log_odds - \
+        2.0 * tf.log(1.0 + tf.exp(-y_times_posterior_temp + posterior_log_odds) + eps)
+
+    return log_prior - log_posterior

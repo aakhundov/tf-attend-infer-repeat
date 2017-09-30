@@ -4,7 +4,8 @@ import tensorflow.contrib.layers as layers
 
 from vae import vae
 from transformer import transformer
-from gumbel import gumbel_softmax_binary
+from gumbel import concrete_binary_pre_sigmoid_sample
+from gumbel import concrete_binary_kl_mc_sample
 
 
 class AIRModel:
@@ -14,7 +15,7 @@ class AIRModel:
                  vae_latent_dimensions=50, vae_recognition_units=(512, 256), vae_generative_units=(256, 512),
                  scale_prior_mean=-1.0, scale_prior_variance=0.1, shift_prior_mean=0.0, shift_prior_variance=1.0,
                  vae_prior_mean=0.0, vae_prior_variance=1.0, vae_likelihood_std=0.3,
-                 z_pres_prior=0.01, gumbel_temperature=1.0, learning_rate=1e-4, gradient_clipping_norm=10.0,
+                 z_pres_prior_log_odds=0.01, z_pres_temperature=1.0, learning_rate=1e-4, gradient_clipping_norm=10.0,
                  num_summary_images=12, train=False, reuse=False, scope="air",
                  annealing_schedules=None):
 
@@ -40,8 +41,8 @@ class AIRModel:
         self.vae_prior_variance = vae_prior_variance
         self.vae_likelihood_std = vae_likelihood_std
 
-        self.z_pres_prior = z_pres_prior
-        self.gumbel_temperature = gumbel_temperature
+        self.z_pres_prior_log_odds = z_pres_prior_log_odds
+        self.z_pres_temperature = z_pres_temperature
         self.learning_rate = learning_rate
         self.gradient_clipping_norm = gradient_clipping_norm
         self.num_summary_images = num_summary_images
@@ -323,7 +324,11 @@ class AIRModel:
                     with tf.variable_scope("output") as scope:
                         z_pres_log_odds = tf.squeeze(layers.fully_connected(hidden, 1, activation_fn=None, scope=scope))
                 with tf.variable_scope("gumbel"):
-                    z_pres = gumbel_softmax_binary(z_pres_log_odds, self.gumbel_temperature, hard=True)
+                    z_pres_pre_sigmoid = concrete_binary_pre_sigmoid_sample(z_pres_log_odds, self.z_pres_temperature)
+
+                    z_pres = tf.nn.sigmoid(z_pres_pre_sigmoid)
+                    z_pres = tf.stop_gradient(tf.round(z_pres) - z_pres) + z_pres
+
                     z_pres_prob = tf.nn.sigmoid(z_pres_log_odds)
                     z_pres_probs_ta = z_pres_probs_ta.write(z_pres_probs_ta.size(), z_pres_prob)
 
@@ -331,6 +336,7 @@ class AIRModel:
                 # z_pres KL-divergence:
                 # previous value of not_finished is used
                 # to account for KL of first z_pres=0
+                """
                 z_pres_kl = not_finished * (
                     z_pres_prob * (
                         tf.log(z_pres_prob + 10e-10) -
@@ -341,8 +347,14 @@ class AIRModel:
                         tf.log(1.0 - self.z_pres_prior + 10e-10)
                     )
                 )
+                """
+                z_pres_kl = not_finished * concrete_binary_kl_mc_sample(
+                    z_pres_pre_sigmoid,
+                    self.z_pres_prior_log_odds, self.z_pres_temperature,
+                    z_pres_log_odds, self.z_pres_temperature
+                )
                 z_pres_kls_ta = z_pres_kls_ta.write(z_pres_kls_ta.size(), z_pres_kl)
-                running_loss += z_pres_kl
+                running_loss -= z_pres_kl
 
             # updating finishing status
             not_finished = tf.where(
