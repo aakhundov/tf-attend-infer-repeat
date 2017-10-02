@@ -58,4 +58,4 @@ def concrete_binary_kl_mc_sample(y,
     log_posterior = tf.log(posterior_temperature + eps) - y_times_posterior_temp + posterior_log_odds - \
         2.0 * tf.log(1.0 + tf.exp(-y_times_posterior_temp + posterior_log_odds) + eps)
 
-    return log_prior - log_posterior
+    return log_posterior - log_prior
