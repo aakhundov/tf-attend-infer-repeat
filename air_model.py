@@ -194,11 +194,10 @@ class AIRModel:
         )
 
         # padding (if required) the number of backward ST matrices up to
-        # self.num_summary_images to avoid possible misalignment errors
-        # in case if there were less than self.max_steps steps globally
+        # self.max_steps to avoid possible misalignment errors in case
+        # if there were less than self.max_steps steps globally
         st_back = tf.pad(st_back, [
-            [0, self.num_summary_images - tf.shape(st_back)[0]],
-            [0, 0], [0, 0], [0, 0]
+            [0, 0], [0, self.max_steps - tf.shape(st_back)[1]], [0, 0], [0, 0]
         ])
 
         # drawing the attention windows
@@ -373,7 +372,8 @@ class AIRModel:
                     z_pres_log_odds, self.z_pres_temperature
                 )
 
-                # adding z_pres KL to the loss
+                # adding z_pres KL scaled by z_pres to the loss
+                # for those batch items that are not yet finished
                 running_loss += tf.where(
                     tf.less(stopping_sum, self.stopping_threshold),
                     z_pres_kl,
@@ -415,7 +415,7 @@ class AIRModel:
                 # for those batch items that are not yet finished
                 running_loss += tf.where(
                     tf.less(stopping_sum, self.stopping_threshold),
-                    z_pres * scale_kl,
+                    scale_kl,
                     tf.zeros_like(running_loss)
                 )
 
@@ -434,7 +434,7 @@ class AIRModel:
                 # for those batch items that are not yet finished
                 running_loss += tf.where(
                     tf.less(stopping_sum, self.stopping_threshold),
-                    z_pres * shift_kl,
+                    shift_kl,
                     tf.zeros_like(running_loss)
                 )
 
@@ -453,7 +453,7 @@ class AIRModel:
                 # for those batch items that are not yet finished
                 running_loss += tf.where(
                     tf.less(stopping_sum, self.stopping_threshold),
-                    z_pres * vae_kl,
+                    vae_kl,
                     tf.zeros_like(running_loss)
                 )
 
