@@ -56,6 +56,7 @@ class AIRModel:
         self.num_summary_images = num_summary_images
 
         self.train = train
+
         self.num_summaries = []
         self.img_summaries = []
         self.var_summaries = []
@@ -71,6 +72,8 @@ class AIRModel:
 
             if annealing_schedules is not None:
                 for param, schedule in annealing_schedules.items():
+                    # replacing some of the parameters by annealed
+                    # versions, if schedule is provided for those
                     setattr(self, param, self._create_annealed_tensor(
                         param, schedule, self.global_step
                     ))
