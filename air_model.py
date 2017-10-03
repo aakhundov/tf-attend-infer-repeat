@@ -89,9 +89,10 @@ class AIRModel:
     def _create_annealed_tensor(param, schedule, global_step):
         return tf.maximum(
             tf.train.exponential_decay(
-                schedule["init"], global_step,
-                schedule["iters"], schedule["factor"],
-                staircase=False, name=param
+                learning_rate=schedule["init"], global_step=global_step,
+                decay_steps=schedule["iters"], decay_rate=schedule["factor"],
+                staircase=False if "staircase" not in schedule else schedule["staircase"],
+                name=param
             ),
             schedule["min"],
             name=param + "_max"
