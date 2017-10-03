@@ -87,10 +87,11 @@ for i in range(2):
     models.append(
         AIRModel(
             model_inputs[i][0], model_inputs[i][1],
-            max_steps=3, max_digits=2, lstm_units=256, canvas_size=CANVAS_SIZE, windows_size=28,
+            max_steps=3, max_digits=2, rnn_units=256, canvas_size=CANVAS_SIZE, windows_size=28,
             vae_latent_dimensions=50, vae_recognition_units=(512, 256), vae_generative_units=(256, 512),
             scale_prior_mean=-1.0, scale_prior_variance=0.1, shift_prior_mean=0.0, shift_prior_variance=1.0,
             vae_prior_mean=0.0, vae_prior_variance=1.0, vae_likelihood_std=0.3,
+            scale_hidden_units=64, shift_hidden_units=64, z_pres_hidden_units=64,
             z_pres_prior_log_odds=-1.0, z_pres_temperature=1.0, stopping_threshold=0.99,
             learning_rate=1e-3, gradient_clipping_norm=100.0,
             num_summary_images=NUM_IMAGES_TO_SAVE, train=(i == 0), reuse=(i == 1), scope="air",

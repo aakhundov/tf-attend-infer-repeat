@@ -11,13 +11,14 @@ from gumbel import concrete_binary_kl_mc_sample
 class AIRModel:
 
     def __init__(self, input_images, target_num_digits,
-                 max_steps=3, max_digits=2, lstm_units=256, canvas_size=50, windows_size=28,
+                 max_steps=3, max_digits=2, rnn_units=256, canvas_size=50, windows_size=28,
                  vae_latent_dimensions=50, vae_recognition_units=(512, 256), vae_generative_units=(256, 512),
                  scale_prior_mean=-1.0, scale_prior_variance=0.1, shift_prior_mean=0.0, shift_prior_variance=1.0,
                  vae_prior_mean=0.0, vae_prior_variance=1.0, vae_likelihood_std=0.3,
-                 z_pres_prior_log_odds=0.01, z_pres_temperature=1.0, stopping_threshold=0.99,
-                 learning_rate=1e-4, gradient_clipping_norm=10.0,
-                 num_summary_images=12, train=False, reuse=False, scope="air",
+                 scale_hidden_units=64, shift_hidden_units=64, z_pres_hidden_units=64,
+                 z_pres_prior_log_odds=-2.0, z_pres_temperature=1.0, stopping_threshold=0.99,
+                 learning_rate=1e-3, gradient_clipping_norm=100.0,
+                 num_summary_images=60, train=False, reuse=False, scope="air",
                  annealing_schedules=None):
 
         self.input_images = input_images
@@ -26,7 +27,7 @@ class AIRModel:
 
         self.max_steps = max_steps
         self.max_digits = max_digits
-        self.lstm_units = lstm_units
+        self.rnn_units = rnn_units
         self.canvas_size = canvas_size
         self.windows_size = windows_size
 
@@ -41,6 +42,10 @@ class AIRModel:
         self.vae_prior_mean = vae_prior_mean
         self.vae_prior_variance = vae_prior_variance
         self.vae_likelihood_std = vae_likelihood_std
+
+        self.scale_hidden_units = scale_hidden_units
+        self.shift_hidden_units = shift_hidden_units
+        self.z_pres_hidden_units = z_pres_hidden_units
 
         self.z_pres_prior_log_odds = z_pres_prior_log_odds
         self.z_pres_temperature = z_pres_temperature
@@ -253,7 +258,7 @@ class AIRModel:
                  z_pres_kls_ta, scale_kls_ta, shift_kls_ta, vae_kls_ta,
                  st_backward_ta):
 
-            with tf.variable_scope("lstm") as scope:
+            with tf.variable_scope("rnn") as scope:
                 # RNN time step
                 outputs, next_state = cell(self.input_images, prev_state, scope=scope)
 
@@ -261,12 +266,12 @@ class AIRModel:
                 # sampling scale
                 with tf.variable_scope("mean"):
                     with tf.variable_scope("hidden") as scope:
-                        hidden = layers.fully_connected(outputs, 64, scope=scope)
+                        hidden = layers.fully_connected(outputs, self.scale_hidden_units, scope=scope)
                     with tf.variable_scope("output") as scope:
                         scale_mean = layers.fully_connected(hidden, 1, activation_fn=None, scope=scope)
                 with tf.variable_scope("log_variance"):
                     with tf.variable_scope("hidden") as scope:
-                        hidden = layers.fully_connected(outputs, 64, scope=scope)
+                        hidden = layers.fully_connected(outputs, self.scale_hidden_units, scope=scope)
                     with tf.variable_scope("output") as scope:
                         scale_log_variance = layers.fully_connected(hidden, 1, activation_fn=None, scope=scope)
                 scale_variance = tf.exp(scale_log_variance)
@@ -278,12 +283,12 @@ class AIRModel:
                 # sampling shift
                 with tf.variable_scope("mean"):
                     with tf.variable_scope("hidden") as scope:
-                        hidden = layers.fully_connected(outputs, 64, scope=scope)
+                        hidden = layers.fully_connected(outputs, self.shift_hidden_units, scope=scope)
                     with tf.variable_scope("output") as scope:
                         shift_mean = layers.fully_connected(hidden, 2, activation_fn=None, scope=scope)
                 with tf.variable_scope("log_variance"):
                     with tf.variable_scope("hidden") as scope:
-                        hidden = layers.fully_connected(outputs, 64, scope=scope)
+                        hidden = layers.fully_connected(outputs, self.shift_hidden_units, scope=scope)
                     with tf.variable_scope("output") as scope:
                         shift_log_variance = layers.fully_connected(hidden, 2, activation_fn=None, scope=scope)
                 shift_variance = tf.exp(shift_log_variance)
@@ -335,7 +340,7 @@ class AIRModel:
                 # closer to 0 - no more digits)
                 with tf.variable_scope("log_odds"):
                     with tf.variable_scope("hidden") as scope:
-                        hidden = layers.fully_connected(outputs, 64, scope=scope)
+                        hidden = layers.fully_connected(outputs, self.z_pres_hidden_units, scope=scope)
                     with tf.variable_scope("output") as scope:
                         z_pres_log_odds = tf.squeeze(
                             layers.fully_connected(hidden, 1, activation_fn=None, scope=scope)
@@ -474,7 +479,7 @@ class AIRModel:
 
         with tf.variable_scope("rnn") as rnn_scope:
             # creating RNN cells and initial state
-            cell = rnn.GRUCell(self.lstm_units, reuse=rnn_scope.reuse)
+            cell = rnn.GRUCell(self.rnn_units, reuse=rnn_scope.reuse)
             rnn_init_state = cell.zero_state(
                 self.batch_size, self.input_images.dtype
             )
