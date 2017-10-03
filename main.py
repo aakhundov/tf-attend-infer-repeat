@@ -100,8 +100,8 @@ for i in range(2):
             learning_rate=1e-3, gradient_clipping_norm=100.0,
             num_summary_images=NUM_IMAGES_TO_SAVE, train=(i == 0), reuse=(i == 1), scope="air",
             annealing_schedules={
-                "z_pres_prior_log_odds": {"init": -0.5, "min": -10.0, "factor": 1.5, "iters": 1000},
-                "learning_rate": {"init": 1e-3, "min": 1e-4, "factor": 0.5, "iters": 10000, "staircase": True}
+                "z_pres_prior_log_odds": {"init": -0.2, "min": -10.0, "factor": 1.5, "iters": 1000},
+                "learning_rate": {"init": 1e-3, "min": 1e-4, "factor": 0.5, "iters": 10000}
             }
         )
     )
