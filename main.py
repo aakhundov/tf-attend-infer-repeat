@@ -14,9 +14,13 @@ EPOCHS = 300
 BATCH_SIZE = 64
 CANVAS_SIZE = 50
 
+# it is assumed that frequencies of more rare
+# summaries in {NUM, VAR, IMG} are divisible
+# by the frequencies of more frequent ones
 NUM_SUMMARIES_EACH_ITERATIONS = 50
-VAR_SUMMARIES_EACH_ITERATIONS = 200
+VAR_SUMMARIES_EACH_ITERATIONS = 250
 IMG_SUMMARIES_EACH_ITERATIONS = 500
+
 GRAD_SUMMARIES_EACH_ITERATIONS = 100
 SAVE_PARAMS_EACH_ITERATIONS = 10000
 NUM_IMAGES_TO_SAVE = 60
@@ -137,9 +141,7 @@ with tf.Session(config=config) as sess:
         step = 0
 
         while True:
-            # saving summaries with configured frequency:
-            # it is assumed that frequencies of more rare
-            # summaries are divisible by more frequent ones
+            # saving summaries with configured frequency
             if step % NUM_SUMMARIES_EACH_ITERATIONS == 0:
                 if step % VAR_SUMMARIES_EACH_ITERATIONS == 0:
                     if step % IMG_SUMMARIES_EACH_ITERATIONS == 0:
