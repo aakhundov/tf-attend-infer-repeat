@@ -42,7 +42,30 @@ def crop_non_empty(image):
     return image[y_start:y_end+1, x_start:x_end+1]
 
 
-def overlaps(x, y, w, h, positions, boxes, gap):
+def add_buffer(image, buffer_width):
+    b = buffer_width
+    w, h = image.shape
+    result = np.copy(image)
+
+    for x in range(w):
+        for y in range(h):
+            if image[y, x] > 0:
+                for i in range(x-b, x+b+1):
+                    for j in range(y-b, y+b+1):
+                        if (0 <= i < w and 0 <= j < h) and result[j, i] == 0:
+                            result[j, i] = 1.0
+
+    return result
+
+
+def pixels_overlap(canvas, image, x, y):
+    h, w = image.shape
+    window = canvas[y:y+h, x:x+w]
+
+    return not np.array_equal(np.maximum(image, window), image + window)
+
+
+def bounding_boxes_overlap(x, y, w, h, positions, boxes, gap):
     for i in range(len(positions) // 2):
         p, b = positions[i*2:(i+1)*2], boxes[i*2:(i+1)*2]
         l1x, l1y, r1x, r1y = x-gap, y-gap, x+w+gap-1, y+h+gap-1
@@ -58,7 +81,7 @@ def overlaps(x, y, w, h, positions, boxes, gap):
 
 def generate_multi_image(single_images, num_images, image_dim, canvas_dim, bg=None,
                          min_w=1.0, max_w=1.0, min_h=1.0, max_h=1.0, min_ang=0.0, max_ang=0.0,
-                         gap=0, margin=0):
+                         gap=0, margin=0, use_pixel_overlap=False):
 
     global digit_ids, next_digit_id, used_digit_ids
 
@@ -119,14 +142,28 @@ def generate_multi_image(single_images, num_images, image_dim, canvas_dim, bg=No
                     x = np.random.randint(margin, canvas_dim - w - margin + 1)
                     y = np.random.randint(margin, canvas_dim - h - margin + 1)
 
-                    if i == 0 or not overlaps(x, y, w, h, placed_image_positions, placed_image_boxes, gap):
+                    if i == 0:
                         position_found = True
+                    else:
+                        if use_pixel_overlap:
+                            position_found = not pixels_overlap(
+                                canvas_with_buffer, image, x, y
+                            )
+                        else:
+                            position_found = not bounding_boxes_overlap(
+                                x, y, w, h, placed_image_positions, placed_image_boxes, gap
+                            )
+
+                    if position_found:
                         break
 
                     position_find_attempts += 1
 
                 if position_found:
                     canvas[y:y+h, x:x+w] += image
+
+                    if use_pixel_overlap and num_digits > 1:
+                        canvas_with_buffer = add_buffer(canvas, gap) if gap > 0 else canvas
 
                     placed_image_positions.extend([x, y])
                     placed_image_boxes.extend([w, h])
@@ -237,7 +274,7 @@ def read_test_data(filename):
 
 if __name__ == "__main__":
 
-    DEFAULT_MAX_DIGITS = 3
+    DEFAULT_MAX_DIGITS = 2
     DEFAULT_MAX_IN_COMMON = 2
     DEFAULT_IMAGES_PER_DIGIT = 20000
     DEFAULT_TEST_SET_SIZE = 1000
@@ -253,7 +290,7 @@ if __name__ == "__main__":
     parser.add_argument("--max-in-common", type=int, choices=list(range(7)), default=DEFAULT_MAX_IN_COMMON)
     parser.add_argument("--images-per-digit", type=int, default=DEFAULT_IMAGES_PER_DIGIT)
     parser.add_argument("--test-set-size", type=int, default=DEFAULT_TEST_SET_SIZE)
-    parser.add_argument("--digit-box-gap", type=int, default=0)
+    parser.add_argument("--digit-gap", type=int, default=0)
     parser.add_argument("--canvas-margin", type=int, default=0)
     parser.add_argument("--bg-path", default="")
     parser.add_argument("--bg-max-intensity", type=float, default=1.0)
@@ -263,6 +300,8 @@ if __name__ == "__main__":
     parser.add_argument("--max-height-scale", type=float, default=1.0)
     parser.add_argument("--min-rotation-angle", type=float, default=0.0)
     parser.add_argument("--max-rotation-angle", type=float, default=0.0)
+    parser.add_argument("--use-pixel-overlap", action='store_true')
+    parser.set_defaults(use_pixel_overlap=False)
     args = parser.parse_args()
 
     if not os.path.exists(MULTI_MNIST_FOLDER):
@@ -295,7 +334,8 @@ if __name__ == "__main__":
                 min_w=args.min_width_scale, max_w=args.max_width_scale,
                 min_h=args.min_height_scale, max_h=args.max_height_scale,
                 min_ang=args.min_rotation_angle, max_ang=args.max_rotation_angle,
-                gap=args.digit_box_gap, margin=args.canvas_margin
+                gap=args.digit_gap, margin=args.canvas_margin,
+                use_pixel_overlap=args.use_pixel_overlap
             )
 
             if num_digits <= args.max_in_common:
