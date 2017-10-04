@@ -225,7 +225,16 @@ def read_test_data(filename):
         images_list.append(np.fromstring(example.features.feature['image'].bytes_list.value[0], dtype=np.float32))
         digits_list.append(int(example.features.feature['digits'].int64_list.value[0]))
 
-    return np.array(images_list), np.array(digits_list)
+    empty = [i for i in range(len(digits_list)) if digits_list[i] == 0]
+    non_empty = [i for i in range(len(digits_list)) if digits_list[i] > 0]
+
+    images_list, digits_list = np.array(images_list), np.array(digits_list)
+    images_list = np.concatenate([np.array([images_list[empty[0]]]), images_list[non_empty], images_list[empty[1:]]])
+    digits_list = np.concatenate([np.array([digits_list[empty[0]]]), digits_list[non_empty], digits_list[empty[1:]]])
+
+    print(images_list.shape, digits_list.shape)
+
+    return images_list, digits_list
 
 
 if __name__ == "__main__":
