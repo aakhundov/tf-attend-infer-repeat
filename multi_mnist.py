@@ -232,8 +232,6 @@ def read_test_data(filename):
     images_list = np.concatenate([np.array([images_list[empty[0]]]), images_list[non_empty], images_list[empty[1:]]])
     digits_list = np.concatenate([np.array([digits_list[empty[0]]]), digits_list[non_empty], digits_list[empty[1:]]])
 
-    print(images_list.shape, digits_list.shape)
-
     return images_list, digits_list
 
 
