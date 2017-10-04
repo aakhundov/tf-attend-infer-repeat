@@ -255,13 +255,14 @@ if __name__ == "__main__":
 
     background = read_image(args.bg_path, args.bg_max_intensity) if args.bg_path != "" else None
 
-    dataset = input_data.read_data_sets(MNIST_FOLDER)
+    dataset = input_data.read_data_sets(MNIST_FOLDER, validation_size=0)
 
     common_images, common_indices, common_positions = [], [], []
     common_boxes, common_labels, common_digits = [], [], []
 
     np.random.seed(0)
 
+    used_digit_ids = set([])
     for num_digits in range(args.max_digits + 1):
         strata_images, strata_indices = [], []
         strata_positions, strata_boxes = [], []
@@ -277,6 +278,10 @@ if __name__ == "__main__":
                 min_ang=args.min_rotation_angle, max_ang=args.max_rotation_angle,
                 gap=args.digit_box_gap, margin=args.canvas_margin
             )
+
+            if num_digits <= args.max_in_common:
+                for digit_id in ids:
+                    used_digit_ids.add(digit_id)
 
             strata_images.append(img)
             strata_indices.append(ids)
@@ -309,6 +314,8 @@ if __name__ == "__main__":
                 common_images, common_indices, common_positions, common_boxes, common_labels, common_digits
               )
 
+            print()
+            print("{0} MNIST digits used for 0-{1} digit images".format(len(used_digit_ids), args.max_in_common))
             print("Writing 0-{} digit images to common file... ".format(args.max_in_common), end="", flush=True)
             write_to_records(MULTI_MNIST_FOLDER + "common",
                              common_images[args.test_set_size:], common_indices[args.test_set_size:],
