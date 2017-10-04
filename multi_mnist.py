@@ -45,8 +45,8 @@ def crop_non_empty(image):
 def overlaps(x, y, w, h, positions, boxes, gap):
     for i in range(len(positions) // 2):
         p, b = positions[i*2:(i+1)*2], boxes[i*2:(i+1)*2]
-        l1x, l1y, r1x, r1y = x-gap, y-gap, x+w+gap, y+h+gap
-        l2x, l2y, r2x, r2y = p[0], p[1], p[0]+b[0], p[1]+b[1]
+        l1x, l1y, r1x, r1y = x-gap, y-gap, x+w+gap-1, y+h+gap-1
+        l2x, l2y, r2x, r2y = p[0], p[1], p[0]+b[0]-1, p[1]+b[1]-1
 
         if l1x <= r2x and l2x <= r1x:
             return True
@@ -108,8 +108,8 @@ def generate_multi_image(single_images, num_images, image_dim, canvas_dim, bg=No
                 position_found = False
 
                 while position_find_attempts < 100:
-                    x = np.random.randint(margin, canvas_dim - w - margin)
-                    y = np.random.randint(margin, canvas_dim - h - margin)
+                    x = np.random.randint(margin, canvas_dim - w - margin + 1)
+                    y = np.random.randint(margin, canvas_dim - h - margin + 1)
 
                     if i == 0 or not overlaps(x, y, w, h, placed_image_positions, placed_image_boxes, gap):
                         position_found = True
@@ -238,8 +238,8 @@ if __name__ == "__main__":
     parser.add_argument("--max-in-common", type=int, choices=list(range(7)), default=DEFAULT_MAX_IN_COMMON)
     parser.add_argument("--images-per-digit", type=int, default=DEFAULT_IMAGES_PER_DIGIT)
     parser.add_argument("--test-set-size", type=int, default=DEFAULT_TEST_SET_SIZE)
-    parser.add_argument("--digit-box-gap", type=int, default=2)
-    parser.add_argument("--canvas-margin", type=int, default=2)
+    parser.add_argument("--digit-box-gap", type=int, default=0)
+    parser.add_argument("--canvas-margin", type=int, default=0)
     parser.add_argument("--bg-path", default="")
     parser.add_argument("--bg-max-intensity", type=float, default=1.0)
     parser.add_argument("--min-width-scale", type=float, default=1.0)
