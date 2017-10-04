@@ -59,6 +59,9 @@ def overlaps(x, y, w, h, positions, boxes, gap):
 def generate_multi_image(single_images, num_images, image_dim, canvas_dim, bg=None,
                          min_w=1.0, max_w=1.0, min_h=1.0, max_h=1.0, min_ang=0.0, max_ang=0.0,
                          gap=0, margin=0):
+
+    global digit_ids, next_digit_id, used_digit_ids
+
     ready = False
     while not ready:
         canvas = np.zeros(
@@ -75,7 +78,12 @@ def generate_multi_image(single_images, num_images, image_dim, canvas_dim, bg=No
 
         try:
             for i in range(num_images):
-                idx = np.random.randint(len(single_images))
+                idx = digit_ids[next_digit_id]
+                next_digit_id += 1
+                if next_digit_id >= len(digit_ids):
+                    digit_ids = np.random.permutation(digit_ids)
+                    next_digit_id = 0
+
                 image = np.reshape(single_images[idx], [image_dim, image_dim])
                 image = crop_non_empty(image)
 
@@ -175,7 +183,7 @@ def shuffle_lists(*lists):
     )
 
     for l in lists:
-        shuffled.append([l[i] for i in perm])
+        shuffled.append(np.array([l[i] for i in perm]))
 
     return shuffled
 
@@ -262,7 +270,11 @@ if __name__ == "__main__":
 
     np.random.seed(0)
 
+    next_digit_id = 0
     used_digit_ids = set([])
+    digit_ids = [i for i in range(len(dataset.train.images))]
+    digit_ids = np.random.permutation(digit_ids)
+
     for num_digits in range(args.max_digits + 1):
         strata_images, strata_indices = [], []
         strata_positions, strata_boxes = [], []
