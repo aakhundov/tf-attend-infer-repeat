@@ -102,13 +102,13 @@ for i in range(2):
             annealing_schedules={
                 "z_pres_prior_log_odds": {
                     "init": -0.01, "min": -10.0,
-                    "factor": 1000.0, "iters": 5000,
-                    "staircase": True
+                    "factor": 1000.0, "iters": 10000,
+                    "staircase": False
                 },
                 "learning_rate": {
                     "init": 1e-3, "min": 1e-4,
                     "factor": 0.5, "iters": 10000,
-                    "staircase": True
+                    "staircase": False
                 }
             }
         )
