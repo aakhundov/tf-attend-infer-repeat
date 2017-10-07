@@ -89,17 +89,33 @@ class AIRModel:
             self._create_model()
 
     @staticmethod
-    def _create_annealed_tensor(param, schedule, global_step):
-        return tf.maximum(
-            tf.train.exponential_decay(
-                learning_rate=schedule["init"], global_step=global_step,
-                decay_steps=schedule["iters"], decay_rate=schedule["factor"],
-                staircase=False if "staircase" not in schedule else schedule["staircase"],
-                name=param
-            ),
-            schedule["min"],
-            name=param + "_max"
+    def _create_annealed_tensor(param, schedule, global_step, eps=10e-10):
+        value = tf.train.exponential_decay(
+            learning_rate=schedule["init"], global_step=global_step,
+            decay_steps=schedule["iters"], decay_rate=schedule["factor"],
+            staircase=False if "staircase" not in schedule else schedule["staircase"],
+            name=param
         )
+
+        if "min" in schedule:
+            value = tf.maximum(
+                value, schedule["min"],
+                name=param + "_max"
+            )
+
+        if "max" in schedule:
+            value = tf.minimum(
+                value, schedule["max"],
+                name=param + "_min"
+            )
+
+        if "log" in schedule and schedule["log"]:
+            value = tf.log(
+                value + eps,
+                name=param + "_log"
+            )
+
+        return value
 
     @staticmethod
     def _sample_from_mvn(mean, diag_variance):
