@@ -300,8 +300,8 @@ if __name__ == "__main__":
     parser.add_argument("--max-height-scale", type=float, default=1.0)
     parser.add_argument("--min-rotation-angle", type=float, default=0.0)
     parser.add_argument("--max-rotation-angle", type=float, default=0.0)
-    parser.add_argument("--use-pixel-overlap", action='store_true')
-    parser.set_defaults(use_pixel_overlap=False)
+    parser.add_argument("--use-bounding-box-overlap", action='store_true')
+    parser.set_defaults(use_bounding_box_overlap=False)
     args = parser.parse_args()
 
     if not os.path.exists(MULTI_MNIST_FOLDER):
@@ -335,7 +335,7 @@ if __name__ == "__main__":
                 min_h=args.min_height_scale, max_h=args.max_height_scale,
                 min_ang=args.min_rotation_angle, max_ang=args.max_rotation_angle,
                 gap=args.digit_gap, margin=args.canvas_margin,
-                use_pixel_overlap=args.use_pixel_overlap
+                use_pixel_overlap=(not args.use_bounding_box_overlap)
             )
 
             if num_digits <= args.max_in_common:
