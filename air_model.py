@@ -17,7 +17,7 @@ class AIRModel:
                  vae_prior_mean=0.0, vae_prior_variance=1.0, vae_likelihood_std=0.3,
                  scale_hidden_units=64, shift_hidden_units=64, z_pres_hidden_units=64,
                  z_pres_prior_log_odds=-2.0, z_pres_temperature=1.0, stopping_threshold=0.99,
-                 learning_rate=1e-3, gradient_clipping_norm=100.0,
+                 learning_rate=1e-3, gradient_clipping_norm=100.0, cnn=True, cnn_filters=8,
                  num_summary_images=60, train=False, reuse=False, scope="air",
                  annealing_schedules=None):
 
@@ -54,6 +54,9 @@ class AIRModel:
         self.learning_rate = learning_rate
         self.gradient_clipping_norm = gradient_clipping_norm
         self.num_summary_images = num_summary_images
+
+        self.cnn = cnn
+        self.cnn_filters = cnn_filters
 
         self.train = train
 
@@ -280,7 +283,7 @@ class AIRModel:
 
             with tf.variable_scope("rnn") as scope:
                 # RNN time step
-                outputs, next_state = cell(self.input_images, prev_state, scope=scope)
+                outputs, next_state = cell(self.rnn_input, prev_state, scope=scope)
 
             with tf.variable_scope("scale"):
                 # sampling scale
@@ -496,6 +499,33 @@ class AIRModel:
                 scales_ta, shifts_ta, z_pres_probs_ta, \
                 z_pres_kls_ta, scale_kls_ta, shift_kls_ta, vae_kls_ta, \
                 st_backward_ta
+
+        if self.cnn:
+            with tf.variable_scope("cnn") as cnn_scope:
+                cnn_input = tf.reshape(self.input_images, [-1, 50, 50, 1], name="cnn_input")
+
+                conv1 = tf.layers.conv2d(
+                    inputs=cnn_input, filters=self.cnn_filters, kernel_size=[5, 5], strides=(1, 1),
+                    padding="same", activation=tf.nn.relu, reuse=cnn_scope.reuse, name="conv1"
+                )
+
+                pool1 = tf.layers.max_pooling2d(inputs=conv1, pool_size=[2, 2], strides=2, name="pool1")
+
+                conv2 = tf.layers.conv2d(
+                    inputs=pool1, filters=self.cnn_filters, kernel_size=[5, 5], strides=(1, 1),
+                    padding="same", activation=tf.nn.relu, reuse=cnn_scope.reuse, name="conv2"
+                )
+
+                pool2 = tf.layers.max_pooling2d(inputs=conv2, pool_size=[2, 2], strides=2, name="pool2")
+
+                conv3 = tf.layers.conv2d(
+                    inputs=pool2, filters=self.cnn_filters, kernel_size=[5, 5], strides=(1, 1),
+                    padding="same", activation=tf.nn.relu, reuse=cnn_scope.reuse, name="conv3"
+                )
+
+                self.rnn_input = tf.reshape(conv3, [-1, 12 * 12 * self.cnn_filters], name="cnn_output")
+        else:
+            self.rnn_input = self.input_images
 
         with tf.variable_scope("rnn") as rnn_scope:
             # creating RNN cells and initial state
