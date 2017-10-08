@@ -97,19 +97,19 @@ for i in range(2):
             vae_prior_mean=0.0, vae_prior_variance=1.0, vae_likelihood_std=0.3,
             scale_hidden_units=64, shift_hidden_units=64, z_pres_hidden_units=64,
             z_pres_prior_log_odds=-0.01, z_pres_temperature=1.0, stopping_threshold=0.99,
-            learning_rate=1e-3, gradient_clipping_norm=100.0,
+            learning_rate=1e-4, gradient_clipping_norm=1.0, cnn=False, cnn_filters=8,
             num_summary_images=NUM_IMAGES_TO_SAVE, train=(i == 0), reuse=(i == 1), scope="air",
             annealing_schedules={
                 "z_pres_prior_log_odds": {
-                    "init": -0.01, "min": -10.0,
-                    "factor": 1000.0, "iters": 10000,
-                    "staircase": False
+                    "init": 10000.0, "min": 0.000001,
+                    "factor": 0.1, "iters": 2000,
+                    "staircase": False, "log": True
                 },
-                "learning_rate": {
-                    "init": 1e-3, "min": 1e-4,
-                    "factor": 0.5, "iters": 10000,
-                    "staircase": False
-                }
+                # "learning_rate": {
+                #     "init": 1e-3, "min": 1e-4,
+                #     "factor": 0.5, "iters": 10000,
+                #     "staircase": False
+                # }
             }
         )
     )
