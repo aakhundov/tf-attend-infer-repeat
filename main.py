@@ -101,8 +101,8 @@ for i in range(2):
             num_summary_images=NUM_IMAGES_TO_SAVE, train=(i == 0), reuse=(i == 1), scope="air",
             annealing_schedules={
                 "z_pres_prior_log_odds": {
-                    "init": 10000.0, "min": 0.000001,
-                    "factor": 0.1, "iters": 2000,
+                    "init": 10000.0, "min": 0.00000001,
+                    "factor": 0.1, "iters": 5000,
                     "staircase": False, "log": True
                 },
                 # "learning_rate": {
