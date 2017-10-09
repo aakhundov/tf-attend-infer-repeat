@@ -300,7 +300,7 @@ class AIRModel:
                 scale_variance = tf.exp(scale_log_variance)
                 scale = tf.nn.sigmoid(self._sample_from_mvn(scale_mean, scale_variance))
                 scales_ta = scales_ta.write(scales_ta.size(), scale)
-                s = tf.squeeze(scale)
+                s = scale[:, 0]
 
             with tf.variable_scope("shift"):
                 # sampling shift
@@ -327,10 +327,10 @@ class AIRModel:
                 ], axis=1)
 
                 # ST forward transformation: canvas -> window
-                window = tf.squeeze(transformer(
+                window = transformer(
                     tf.expand_dims(tf.reshape(self.input_images, [-1, self.canvas_size, self.canvas_size]), 3),
                     theta, [self.windows_size, self.windows_size]
-                ))
+                )[:, :, :, 0]
 
             with tf.variable_scope("vae"):
                 # reconstructing the window in VAE
@@ -352,10 +352,10 @@ class AIRModel:
                 st_backward_ta = st_backward_ta.write(st_backward_ta.size(), theta_recon)
 
                 # ST backward transformation: window -> canvas
-                window_recon = tf.squeeze(transformer(
+                window_recon = transformer(
                     tf.expand_dims(tf.reshape(vae_recon, [-1, self.windows_size, self.windows_size]), 3),
                     theta_recon, [self.canvas_size, self.canvas_size]
-                ))
+                )[:, :, :, 0]
 
             with tf.variable_scope("z_pres"):
                 # sampling relaxed (continuous) value of z_pres flag
@@ -365,9 +365,7 @@ class AIRModel:
                     with tf.variable_scope("hidden") as scope:
                         hidden = layers.fully_connected(outputs, self.z_pres_hidden_units, scope=scope)
                     with tf.variable_scope("output") as scope:
-                        z_pres_log_odds = tf.squeeze(
-                            layers.fully_connected(hidden, 1, activation_fn=None, scope=scope)
-                        )
+                        z_pres_log_odds = layers.fully_connected(hidden, 1, activation_fn=None, scope=scope)[:, 0]
                 with tf.variable_scope("gumbel"):
                     # sampling pre-sigmoid value from concrete distribution
                     # with given location (z_pres_log_odds) and temperature
