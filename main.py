@@ -14,9 +14,13 @@ EPOCHS = 300
 BATCH_SIZE = 64
 CANVAS_SIZE = 50
 
+# it is assumed that frequencies of more rare
+# summaries in {NUM, VAR, IMG} are divisible
+# by the frequencies of more frequent ones
 NUM_SUMMARIES_EACH_ITERATIONS = 50
-VAR_SUMMARIES_EACH_ITERATIONS = 500
-IMG_SUMMARIES_EACH_ITERATIONS = 1000
+VAR_SUMMARIES_EACH_ITERATIONS = 250
+IMG_SUMMARIES_EACH_ITERATIONS = 500
+
 GRAD_SUMMARIES_EACH_ITERATIONS = 100
 SAVE_PARAMS_EACH_ITERATIONS = 10000
 NUM_IMAGES_TO_SAVE = 60
@@ -87,16 +91,25 @@ for i in range(2):
     models.append(
         AIRModel(
             model_inputs[i][0], model_inputs[i][1],
-            max_steps=3, max_digits=2, lstm_units=256, canvas_size=CANVAS_SIZE, windows_size=28,
+            max_steps=3, max_digits=2, rnn_units=256, canvas_size=CANVAS_SIZE, windows_size=28,
             vae_latent_dimensions=50, vae_recognition_units=(512, 256), vae_generative_units=(256, 512),
-            scale_prior_mean=-1.0, scale_prior_variance=0.1, shift_prior_mean=0.0, shift_prior_variance=1.0,
+            scale_prior_mean=-1.0, scale_prior_variance=0.02, shift_prior_mean=0.0, shift_prior_variance=1.0,
             vae_prior_mean=0.0, vae_prior_variance=1.0, vae_likelihood_std=0.3,
-            z_pres_prior=1e-1, gumbel_temperature=10.0, learning_rate=1e-3, gradient_clipping_norm=100.0,
+            scale_hidden_units=64, shift_hidden_units=64, z_pres_hidden_units=64,
+            z_pres_prior_log_odds=-0.01, z_pres_temperature=1.0, stopping_threshold=0.99,
+            learning_rate=1e-4, gradient_clipping_norm=1.0, cnn=False, cnn_filters=8,
             num_summary_images=NUM_IMAGES_TO_SAVE, train=(i == 0), reuse=(i == 1), scope="air",
             annealing_schedules={
-                "z_pres_prior": {"init": 1e-1, "min": 1e-9, "factor": 0.5, "iters": 1000},
-                "gumbel_temperature": {"init": 10.0, "min": 0.1, "factor": 0.8, "iters": 1000},
-                "learning_rate": {"init": 1e-3, "min": 1e-4, "factor": 0.5, "iters": 1000}
+                "z_pres_prior_log_odds": {
+                    "init": 10000.0, "min": 0.00000001,
+                    "factor": 0.1, "iters": 5000,
+                    "staircase": False, "log": True
+                },
+                # "learning_rate": {
+                #     "init": 1e-3, "min": 1e-4,
+                #     "factor": 0.5, "iters": 10000,
+                #     "staircase": False
+                # }
             }
         )
     )
@@ -136,9 +149,7 @@ with tf.Session(config=config) as sess:
         step = 0
 
         while True:
-            # saving summaries with configured frequency:
-            # it is assumed that frequencies of more rare
-            # summaries are divisible by more frequent ones
+            # saving summaries with configured frequency
             if step % NUM_SUMMARIES_EACH_ITERATIONS == 0:
                 if step % VAR_SUMMARIES_EACH_ITERATIONS == 0:
                     if step % IMG_SUMMARIES_EACH_ITERATIONS == 0:

@@ -4,18 +4,21 @@ import tensorflow.contrib.layers as layers
 
 from vae import vae
 from transformer import transformer
-from gumbel import gumbel_softmax_binary
+from gumbel import concrete_binary_pre_sigmoid_sample
+from gumbel import concrete_binary_kl_mc_sample
 
 
 class AIRModel:
 
     def __init__(self, input_images, target_num_digits,
-                 max_steps=3, max_digits=2, lstm_units=256, canvas_size=50, windows_size=28,
+                 max_steps=3, max_digits=2, rnn_units=256, canvas_size=50, windows_size=28,
                  vae_latent_dimensions=50, vae_recognition_units=(512, 256), vae_generative_units=(256, 512),
                  scale_prior_mean=-1.0, scale_prior_variance=0.1, shift_prior_mean=0.0, shift_prior_variance=1.0,
                  vae_prior_mean=0.0, vae_prior_variance=1.0, vae_likelihood_std=0.3,
-                 z_pres_prior=0.01, gumbel_temperature=1.0, learning_rate=1e-4, gradient_clipping_norm=10.0,
-                 num_summary_images=12, train=False, reuse=False, scope="air",
+                 scale_hidden_units=64, shift_hidden_units=64, z_pres_hidden_units=64,
+                 z_pres_prior_log_odds=-2.0, z_pres_temperature=1.0, stopping_threshold=0.99,
+                 learning_rate=1e-3, gradient_clipping_norm=100.0, cnn=True, cnn_filters=8,
+                 num_summary_images=60, train=False, reuse=False, scope="air",
                  annealing_schedules=None):
 
         self.input_images = input_images
@@ -24,7 +27,7 @@ class AIRModel:
 
         self.max_steps = max_steps
         self.max_digits = max_digits
-        self.lstm_units = lstm_units
+        self.rnn_units = rnn_units
         self.canvas_size = canvas_size
         self.windows_size = windows_size
 
@@ -40,13 +43,23 @@ class AIRModel:
         self.vae_prior_variance = vae_prior_variance
         self.vae_likelihood_std = vae_likelihood_std
 
-        self.z_pres_prior = z_pres_prior
-        self.gumbel_temperature = gumbel_temperature
+        self.scale_hidden_units = scale_hidden_units
+        self.shift_hidden_units = shift_hidden_units
+        self.z_pres_hidden_units = z_pres_hidden_units
+
+        self.z_pres_prior_log_odds = z_pres_prior_log_odds
+        self.z_pres_temperature = z_pres_temperature
+        self.stopping_threshold = stopping_threshold
+
         self.learning_rate = learning_rate
         self.gradient_clipping_norm = gradient_clipping_norm
         self.num_summary_images = num_summary_images
 
+        self.cnn = cnn
+        self.cnn_filters = cnn_filters
+
         self.train = train
+
         self.num_summaries = []
         self.img_summaries = []
         self.var_summaries = []
@@ -62,6 +75,8 @@ class AIRModel:
 
             if annealing_schedules is not None:
                 for param, schedule in annealing_schedules.items():
+                    # replacing some of the parameters by annealed
+                    # versions, if schedule is provided for those
                     setattr(self, param, self._create_annealed_tensor(
                         param, schedule, self.global_step
                     ))
@@ -77,16 +92,33 @@ class AIRModel:
             self._create_model()
 
     @staticmethod
-    def _create_annealed_tensor(param, schedule, global_step):
-        return tf.maximum(
-            tf.train.exponential_decay(
-                schedule["init"], global_step,
-                schedule["iters"], schedule["factor"],
-                staircase=True, name=param
-            ),
-            schedule["min"],
-            name=param + "_max"
+    def _create_annealed_tensor(param, schedule, global_step, eps=10e-10):
+        value = tf.train.exponential_decay(
+            learning_rate=schedule["init"], global_step=global_step,
+            decay_steps=schedule["iters"], decay_rate=schedule["factor"],
+            staircase=False if "staircase" not in schedule else schedule["staircase"],
+            name=param
         )
+
+        if "min" in schedule:
+            value = tf.maximum(
+                value, schedule["min"],
+                name=param + "_max"
+            )
+
+        if "max" in schedule:
+            value = tf.minimum(
+                value, schedule["max"],
+                name=param + "_min"
+            )
+
+        if "log" in schedule and schedule["log"]:
+            value = tf.log(
+                value + eps,
+                name=param + "_log"
+            )
+
+        return value
 
     @staticmethod
     def _sample_from_mvn(mean, diag_variance):
@@ -152,6 +184,7 @@ class AIRModel:
     def _summarize_by_step(self, tensor, steps, name, one_more_step=False, all_steps=False):
         # padding (if required) the number of rows in the tensor
         # up to self.max_steps to avoid possible "out of range" errors
+        # in case if there were less than self.max_steps steps globally
         tensor = tf.pad(tensor, [[0, 0], [0, self.max_steps - tf.shape(tensor)[1]]])
 
         for i in range(self.max_steps):
@@ -187,6 +220,13 @@ class AIRModel:
             tf.reshape(reconstruction, [-1, self.canvas_size, self.canvas_size, 1]),
             [zoom * self.canvas_size, zoom * self.canvas_size]
         )
+
+        # padding (if required) the number of backward ST matrices up to
+        # self.max_steps to avoid possible misalignment errors in case
+        # if there were less than self.max_steps steps globally
+        st_back = tf.pad(st_back, [
+            [0, 0], [0, self.max_steps - tf.shape(st_back)[1]], [0, 0], [0, 0]
+        ])
 
         # drawing the attention windows
         # using backward ST matrices
@@ -228,29 +268,35 @@ class AIRModel:
 
     def _create_model(self):
         # condition of tf.while_loop
-        def cond(step, not_finished, *_):
+        def cond(step, stopping_sum, *_):
             return tf.logical_and(
                 tf.less(step, self.max_steps),
-                tf.greater(tf.reduce_max(not_finished), 0.0)
+                tf.reduce_any(tf.less(stopping_sum, self.stopping_threshold))
             )
 
         # body of tf.while_loop
-        def body(step, not_finished, prev_state,
+        def body(step, stopping_sum, prev_state,
                  running_recon, running_loss, running_digits,
                  scales_ta, shifts_ta, z_pres_probs_ta,
                  z_pres_kls_ta, scale_kls_ta, shift_kls_ta, vae_kls_ta,
                  st_backward_ta):
 
-            with tf.variable_scope("lstm") as scope:
+            with tf.variable_scope("rnn") as scope:
                 # RNN time step
-                outputs, next_state = cell(self.input_images, prev_state, scope=scope)
+                outputs, next_state = cell(self.rnn_input, prev_state, scope=scope)
 
             with tf.variable_scope("scale"):
                 # sampling scale
-                with tf.variable_scope("mean") as scope:
-                    scale_mean = layers.fully_connected(outputs, 1, activation_fn=None, scope=scope)
-                with tf.variable_scope("log_variance") as scope:
-                    scale_log_variance = layers.fully_connected(outputs, 1, activation_fn=None, scope=scope)
+                with tf.variable_scope("mean"):
+                    with tf.variable_scope("hidden") as scope:
+                        hidden = layers.fully_connected(outputs, self.scale_hidden_units, scope=scope)
+                    with tf.variable_scope("output") as scope:
+                        scale_mean = layers.fully_connected(hidden, 1, activation_fn=None, scope=scope)
+                with tf.variable_scope("log_variance"):
+                    with tf.variable_scope("hidden") as scope:
+                        hidden = layers.fully_connected(outputs, self.scale_hidden_units, scope=scope)
+                    with tf.variable_scope("output") as scope:
+                        scale_log_variance = layers.fully_connected(hidden, 1, activation_fn=None, scope=scope)
                 scale_variance = tf.exp(scale_log_variance)
                 scale = tf.nn.sigmoid(self._sample_from_mvn(scale_mean, scale_variance))
                 scales_ta = scales_ta.write(scales_ta.size(), scale)
@@ -258,10 +304,16 @@ class AIRModel:
 
             with tf.variable_scope("shift"):
                 # sampling shift
-                with tf.variable_scope("mean") as scope:
-                    shift_mean = layers.fully_connected(outputs, 2, activation_fn=None, scope=scope)
-                with tf.variable_scope("log_variance") as scope:
-                    shift_log_variance = layers.fully_connected(outputs, 2, activation_fn=None, scope=scope)
+                with tf.variable_scope("mean"):
+                    with tf.variable_scope("hidden") as scope:
+                        hidden = layers.fully_connected(outputs, self.shift_hidden_units, scope=scope)
+                    with tf.variable_scope("output") as scope:
+                        shift_mean = layers.fully_connected(hidden, 2, activation_fn=None, scope=scope)
+                with tf.variable_scope("log_variance"):
+                    with tf.variable_scope("hidden") as scope:
+                        hidden = layers.fully_connected(outputs, self.shift_hidden_units, scope=scope)
+                    with tf.variable_scope("output") as scope:
+                        shift_log_variance = layers.fully_connected(hidden, 2, activation_fn=None, scope=scope)
                 shift_variance = tf.exp(shift_log_variance)
                 shift = tf.nn.tanh(self._sample_from_mvn(shift_mean, shift_variance))
                 shifts_ta = shifts_ta.write(shifts_ta.size(), shift)
@@ -295,6 +347,8 @@ class AIRModel:
                     tf.concat([tf.stack([tf.zeros_like(s), 1.0 / s], axis=1), tf.expand_dims(-y / s, 1)], axis=1),
                 ], axis=1)
 
+                # collecting backward transformation matrices of ST
+                # to be used for visualizing the attention windows
                 st_backward_ta = st_backward_ta.write(st_backward_ta.size(), theta_recon)
 
                 # ST backward transformation: window -> canvas
@@ -304,93 +358,178 @@ class AIRModel:
                 ))
 
             with tf.variable_scope("z_pres"):
-                # sampling z_pres flag (1 - more digits, 0 - no more digits)
-                with tf.variable_scope("log_odds") as scope:
-                    z_pres_log_odds = tf.squeeze(layers.fully_connected(outputs, 1, activation_fn=None, scope=scope))
+                # sampling relaxed (continuous) value of z_pres flag
+                # from Concrete distribution (closer to 1 - more digits,
+                # closer to 0 - no more digits)
+                with tf.variable_scope("log_odds"):
+                    with tf.variable_scope("hidden") as scope:
+                        hidden = layers.fully_connected(outputs, self.z_pres_hidden_units, scope=scope)
+                    with tf.variable_scope("output") as scope:
+                        z_pres_log_odds = tf.squeeze(
+                            layers.fully_connected(hidden, 1, activation_fn=None, scope=scope)
+                        )
                 with tf.variable_scope("gumbel"):
-                    z_pres = gumbel_softmax_binary(z_pres_log_odds, self.gumbel_temperature, hard=True)
+                    # sampling pre-sigmoid value from concrete distribution
+                    # with given location (z_pres_log_odds) and temperature
+                    z_pres_pre_sigmoid = concrete_binary_pre_sigmoid_sample(
+                        z_pres_log_odds, self.z_pres_temperature
+                    )
+
+                    # applying sigmoid to render the Concrete sample
+                    z_pres = tf.nn.sigmoid(z_pres_pre_sigmoid)
+
+                    # during test time, rounding the Concrete sample
+                    # to obtain the corresponding Bernoulli sample
+                    if not self.train:
+                        z_pres = tf.round(z_pres)
+
+                    # computing and collecting underlying Bernoulli
+                    # probability from inferred log-odds solely for
+                    # analysis purposes (not used in the model)
                     z_pres_prob = tf.nn.sigmoid(z_pres_log_odds)
                     z_pres_probs_ta = z_pres_probs_ta.write(z_pres_probs_ta.size(), z_pres_prob)
 
             with tf.variable_scope("loss/z_pres_kl"):
                 # z_pres KL-divergence:
-                # previous value of not_finished is used
-                # to account for KL of first z_pres=0
-                z_pres_kl = not_finished * (
-                    z_pres_prob * (
-                        tf.log(z_pres_prob + 10e-10) -
-                        tf.log(self.z_pres_prior + 10e-10)
-                    ) +
-                    (1.0 - z_pres_prob) * (
-                        tf.log(1.0 - z_pres_prob + 10e-10) -
-                        tf.log(1.0 - self.z_pres_prior + 10e-10)
-                    )
+                # previous value of stop_sum is used
+                # to account for KL of first z_pres after
+                # stop_sum becomes >= 1.0
+                z_pres_kl = concrete_binary_kl_mc_sample(
+                    z_pres_pre_sigmoid,
+                    self.z_pres_prior_log_odds, self.z_pres_temperature,
+                    z_pres_log_odds, self.z_pres_temperature
                 )
+
+                # adding z_pres KL scaled by z_pres to the loss
+                # for those batch items that are not yet finished
+                running_loss += tf.where(
+                    tf.less(stopping_sum, self.stopping_threshold),
+                    z_pres_kl,
+                    tf.zeros_like(running_loss)
+                )
+
+                # populating z_pres KL's TensorArray with a new value
                 z_pres_kls_ta = z_pres_kls_ta.write(z_pres_kls_ta.size(), z_pres_kl)
-                running_loss += z_pres_kl
 
-            # updating finishing status
-            not_finished = tf.where(
-                tf.equal(not_finished, 1.0),
-                z_pres * tf.stop_gradient(not_finished),
-                tf.zeros_like(not_finished)
-            )
+            # updating stop sum by adding (1 - z_pres) to it:
+            # for small z_pres values stop_sum becomes greater
+            # or equal to self.stopping_threshold and attention
+            # counting of the corresponding batch item stops
+            stopping_sum += (1.0 - z_pres)
 
-            # running inferred number of digits per batch item
-            running_digits += tf.cast(not_finished, tf.int32)
+            # updating inferred number of digits per batch item
+            running_digits += tf.cast(tf.less(stopping_sum, self.stopping_threshold), tf.int32)
 
             with tf.variable_scope("canvas"):
-                # adding reconstructed window to the running canvas
-                running_recon += tf.expand_dims(not_finished, 1) * \
-                    tf.reshape(window_recon, [-1, self.canvas_size * self.canvas_size])
+                # adding reconstructed patch scaled
+                # by z_pres to the running canvas
+                running_recon += tf.where(
+                    tf.less(stopping_sum, self.stopping_threshold),
+                    tf.expand_dims(z_pres, 1) * tf.reshape(
+                        window_recon, [-1, self.canvas_size * self.canvas_size]
+                    ),
+                    tf.zeros_like(running_recon)
+                )
 
             with tf.variable_scope("loss/scale_kl"):
                 # scale KL-divergence
-                scale_kl = not_finished * (
-                    0.5 * tf.reduce_sum(
-                        self.scale_prior_log_variance - scale_log_variance -
-                        1.0 + scale_variance / self.scale_prior_variance +
-                        tf.square(scale_mean - self.scale_prior_mean) / self.scale_prior_variance, 1
-                    )
+                scale_kl = 0.5 * tf.reduce_sum(
+                    self.scale_prior_log_variance - scale_log_variance -
+                    1.0 + scale_variance / self.scale_prior_variance +
+                    tf.square(scale_mean - self.scale_prior_mean) / self.scale_prior_variance, 1
                 )
+
+                # adding scale KL scaled by z_pres to the loss
+                # for those batch items that are not yet finished
+                running_loss += tf.where(
+                    tf.less(stopping_sum, self.stopping_threshold),
+                    scale_kl,
+                    tf.zeros_like(running_loss)
+                )
+
+                # populating scale KL's TensorArray with a new value
                 scale_kls_ta = scale_kls_ta.write(scale_kls_ta.size(), scale_kl)
-                running_loss += scale_kl
 
             with tf.variable_scope("loss/shift_kl"):
                 # shift KL-divergence
-                shift_kl = not_finished * (
-                    0.5 * tf.reduce_sum(
-                        self.shift_prior_log_variance - shift_log_variance -
-                        1.0 + shift_variance / self.shift_prior_variance +
-                        tf.square(shift_mean - self.shift_prior_mean) / self.shift_prior_variance, 1
-                    )
+                shift_kl = 0.5 * tf.reduce_sum(
+                    self.shift_prior_log_variance - shift_log_variance -
+                    1.0 + shift_variance / self.shift_prior_variance +
+                    tf.square(shift_mean - self.shift_prior_mean) / self.shift_prior_variance, 1
                 )
+
+                # adding shift KL scaled by z_pres to the loss
+                # for those batch items that are not yet finished
+                running_loss += tf.where(
+                    tf.less(stopping_sum, self.stopping_threshold),
+                    shift_kl,
+                    tf.zeros_like(running_loss)
+                )
+
+                # populating shift KL's TensorArray with a new value
                 shift_kls_ta = shift_kls_ta.write(shift_kls_ta.size(), shift_kl)
-                running_loss += shift_kl
 
             with tf.variable_scope("loss/VAE_kl"):
-                # VAE KL_DIVERGENCE
-                vae_kl = not_finished * (
-                    0.5 * tf.reduce_sum(
-                        self.vae_prior_log_variance - vae_log_variance -
-                        1.0 + tf.exp(vae_log_variance) / self.vae_prior_variance +
-                        tf.square(vae_mean - self.vae_prior_mean) / self.vae_prior_variance, 1
-                    )
+                # VAE KL-divergence
+                vae_kl = 0.5 * tf.reduce_sum(
+                    self.vae_prior_log_variance - vae_log_variance -
+                    1.0 + tf.exp(vae_log_variance) / self.vae_prior_variance +
+                    tf.square(vae_mean - self.vae_prior_mean) / self.vae_prior_variance, 1
                 )
-                vae_kls_ta = vae_kls_ta.write(vae_kls_ta.size(), vae_kl)
-                running_loss += vae_kl
 
+                # adding VAE KL scaled by (1-z_pres) to the loss
+                # for those batch items that are not yet finished
+                running_loss += tf.where(
+                    tf.less(stopping_sum, self.stopping_threshold),
+                    vae_kl,
+                    tf.zeros_like(running_loss)
+                )
+
+                # populating VAE KL's TensorArray with a new value
+                vae_kls_ta = vae_kls_ta.write(vae_kls_ta.size(), vae_kl)
+
+            # explicating the shape of "batch-sized"
+            # tensors for TensorFlow graph compiler
+            stopping_sum.set_shape([None])
+            running_digits.set_shape([None])
             running_loss.set_shape([None])
 
-            return step + 1, not_finished, next_state, \
+            return step + 1, stopping_sum, next_state, \
                 running_recon, running_loss, running_digits, \
                 scales_ta, shifts_ta, z_pres_probs_ta, \
                 z_pres_kls_ta, scale_kls_ta, shift_kls_ta, vae_kls_ta, \
                 st_backward_ta
 
+        if self.cnn:
+            with tf.variable_scope("cnn") as cnn_scope:
+                cnn_input = tf.reshape(self.input_images, [-1, 50, 50, 1], name="cnn_input")
+
+                conv1 = tf.layers.conv2d(
+                    inputs=cnn_input, filters=self.cnn_filters, kernel_size=[5, 5], strides=(1, 1),
+                    padding="same", activation=tf.nn.relu, reuse=cnn_scope.reuse, name="conv1"
+                )
+
+                pool1 = tf.layers.max_pooling2d(inputs=conv1, pool_size=[2, 2], strides=2, name="pool1")
+
+                conv2 = tf.layers.conv2d(
+                    inputs=pool1, filters=self.cnn_filters, kernel_size=[5, 5], strides=(1, 1),
+                    padding="same", activation=tf.nn.relu, reuse=cnn_scope.reuse, name="conv2"
+                )
+
+                pool2 = tf.layers.max_pooling2d(inputs=conv2, pool_size=[2, 2], strides=2, name="pool2")
+
+                conv3 = tf.layers.conv2d(
+                    inputs=pool2, filters=self.cnn_filters, kernel_size=[5, 5], strides=(1, 1),
+                    padding="same", activation=tf.nn.relu, reuse=cnn_scope.reuse, name="conv3"
+                )
+
+                self.rnn_input = tf.reshape(conv3, [-1, 12 * 12 * self.cnn_filters], name="cnn_output")
+        else:
+            self.rnn_input = self.input_images
+
         with tf.variable_scope("rnn") as rnn_scope:
             # creating RNN cells and initial state
-            cell = rnn.GRUCell(self.lstm_units, reuse=rnn_scope.reuse)
+            cell = rnn.GRUCell(self.rnn_units, reuse=rnn_scope.reuse)
             rnn_init_state = cell.zero_state(
                 self.batch_size, self.input_images.dtype
             )
@@ -400,7 +539,7 @@ class AIRModel:
                 z_pres_probs, z_pres_kls, scale_kls, shift_kls, vae_kls, st_backward = tf.while_loop(
                     cond, body, [
                         tf.constant(0),                                 # RNN time step, initially zero
-                        tf.fill([self.batch_size], 1.0),                # "not_finished" tensor, 1 - not finished
+                        tf.zeros([self.batch_size]),                    # running sum of z_pres samples
                         rnn_init_state,                                 # initial RNN state
                         tf.zeros_like(self.input_images),               # reconstruction canvas, initially empty
                         tf.zeros([self.batch_size]),                    # running value of the loss function
