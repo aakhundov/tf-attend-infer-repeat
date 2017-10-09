@@ -7,7 +7,7 @@ import tensorflow as tf
 from multi_mnist import read_and_decode
 from multi_mnist import read_test_data
 
-from air_model import AIRModel
+from air.air_model import AIRModel
 
 
 EPOCHS = 300

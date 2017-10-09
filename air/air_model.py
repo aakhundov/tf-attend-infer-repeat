@@ -2,10 +2,10 @@ import tensorflow as tf
 import tensorflow.contrib.rnn as rnn
 import tensorflow.contrib.layers as layers
 
-from vae import vae
-from transformer import transformer
-from gumbel import concrete_binary_pre_sigmoid_sample
-from gumbel import concrete_binary_kl_mc_sample
+from .vae import vae
+from .transformer import transformer
+from .concrete import concrete_binary_pre_sigmoid_sample
+from .concrete import concrete_binary_kl_mc_sample
 
 
 class AIRModel:
