@@ -62,10 +62,15 @@ os.makedirs(SUMMARIES_FOLDER)
 os.makedirs(SOURCE_FOLDER)
 
 # creating a copy of the current version of *.py source files
-for file in [f for f in os.listdir(".") if f.endswith(".py")]:
-    shutil.copy(file, SOURCE_FOLDER + file)
+for folder in ["./", "air/"]:
+    destination = SOURCE_FOLDER
+    if folder != "./":
+        destination += folder
+        os.makedirs(destination)
+    for file in [f for f in os.listdir(folder) if f.endswith(".py")]:
+        shutil.copy(folder + file, destination + file)
 
-
+print("Creating input pipeline...")
 with tf.variable_scope("pipeline"):
     # fetching a batch of numbers of digits and images from a queue
     filename_queue = tf.train.string_input_producer(
@@ -88,6 +93,9 @@ model_inputs = [
 # creating two separate models - for training and testing - with
 # identical configuration and sharing the same set of variables
 for i in range(2):
+    print("Creating {0} model...".format(
+        "training" if i == 0 else "testing"
+    ))
     models.append(
         AIRModel(
             model_inputs[i][0], model_inputs[i][1],
@@ -123,9 +131,11 @@ config.gpu_options.allow_growth = True
 with tf.Session(config=config) as sess:
     coord = tf.train.Coordinator()
 
+    print("Initializing variables...")
     sess.run(tf.local_variables_initializer())
     sess.run(tf.global_variables_initializer())
 
+    print("Starting queue runners...")
     threads = tf.train.start_queue_runners(sess=sess, coord=coord)
     writer = tf.summary.FileWriter(SUMMARIES_FOLDER, sess.graph)
     saver = tf.train.Saver(max_to_keep=10000)
@@ -138,11 +148,15 @@ with tf.Session(config=config) as sess:
     # gradient summaries are fetched from the training model
     grad_summaries = tf.summary.merge(train_model.grad_summaries)
 
+    print("Reading test set...")
     # reading the test dataset, to be used with test model for
     # computing all summaries throughout the training process
     test_images, test_num_digits = read_test_data(
         TEST_DATA_FILE, shift_zero_digits_images=True
     )
+
+    print("Training...")
+    print()
 
     try:
         # beginning with step = 0 to capture all summaries
