@@ -40,4 +40,4 @@ def vae(inputs, input_dim, rec_hidden_units, latent_dim,
             generative_sample
         )
 
-    return reconstruction, recognition_mean, recognition_log_variance
+    return reconstruction, recognition_mean, recognition_log_variance, recognition_sample
