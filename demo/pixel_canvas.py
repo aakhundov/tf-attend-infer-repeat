@@ -7,7 +7,7 @@ import tkinter as tk
 
 class PixelCanvas(tk.Canvas):
     def __init__(self, master, w, h, image=None,
-                 drawable=True, line_thickness=3, **kw):
+                 drawable=True, line_width=3, **kw):
 
         tk.Canvas.__init__(self, master=master, **kw)
 
@@ -15,10 +15,11 @@ class PixelCanvas(tk.Canvas):
         self.w, self.h = w, h
 
         if image is not None:
-            self.image = image.copy
+            self.image = image.copy()
         else:
             self.image = np.zeros((w, h), dtype=np.float32)
 
+        self.last_drawn_image = None
         self.redraw_lock = threading.Lock()
         self.photo = tk.PhotoImage(width=0, height=0, format='PPM')
         self.photo_id = self.create_image(0, 0, image=self.photo, anchor=tk.NW)
@@ -26,7 +27,7 @@ class PixelCanvas(tk.Canvas):
 
         if drawable:
             self.erasing = False
-            self.line_thickness = line_thickness
+            self.line_width = line_width
             self.bind("<Button-1>", self._left_click)
             self.bind("<Button-2>", self._right_click)  # Mac OS
             self.bind("<Button-3>", self._right_click)  # Windows
@@ -38,8 +39,10 @@ class PixelCanvas(tk.Canvas):
 
     def _redraw_canvas(self, resize=False):
         with self.redraw_lock:
-            if not resize and np.all(self.last_drawn_image == self.image):
-                return
+            if not resize and \
+               self.last_drawn_image is not None and \
+               np.all(self.last_drawn_image == self.image):
+                    return
             self.last_drawn_image = self.image.copy()
 
         self.cw = self.winfo_width()
@@ -48,7 +51,7 @@ class PixelCanvas(tk.Canvas):
         self.rh = self.ch / self.h
 
         arr = np.kron(
-            np.transpose(self.image),
+            self.image,
             np.ones((
                 int(math.ceil(self.rh)),
                 int(math.ceil(self.rw))
@@ -75,23 +78,23 @@ class PixelCanvas(tk.Canvas):
     def _get_image_coordinates(self, cx, cy):
         ceil_w = int(math.ceil(self.rw))
         if self.cw % ceil_w == 0:
-            i = int(math.floor(cx / self.rw))
+            i = int(math.floor(cy / self.rw))
         else:
             diff = self.w * ceil_w - self.cw
-            if cx < diff * (ceil_w - 1):
-                i = int(math.floor(cx / (ceil_w - 1)))
+            if cy < diff * (ceil_w - 1):
+                i = int(math.floor(cy / (ceil_w - 1)))
             else:
-                i = diff + int(math.floor((cx - diff * (ceil_w - 1)) / ceil_w))
+                i = diff + int(math.floor((cy - diff * (ceil_w - 1)) / ceil_w))
 
         ceil_h = int(math.ceil(self.rh))
         if self.ch % ceil_h == 0:
-            j = int(math.floor(cy / self.rh))
+            j = int(math.floor(cx / self.rh))
         else:
             diff = self.h * ceil_h - self.ch
-            if cy < diff * (ceil_h - 1):
-                j = int(math.floor(cy / (ceil_h - 1)))
+            if cx < diff * (ceil_h - 1):
+                j = int(math.floor(cx / (ceil_h - 1)))
             else:
-                j = diff + int(math.floor((cy - diff * (ceil_h - 1)) / ceil_h))
+                j = diff + int(math.floor((cx - diff * (ceil_h - 1)) / ceil_h))
 
         return i, j
 
@@ -133,19 +136,22 @@ class PixelCanvas(tk.Canvas):
 
     def _draw_line(self, cx1, cy1, cx2, cy2):
         length = math.sqrt((cx2 - cx1) ** 2 + (cy2 - cy1) ** 2)
-        thickness = self.line_thickness if not self.erasing else 3
+        line_width = self.line_width if not self.erasing else 3
 
-        if thickness == 1:
+        if length < 1.0:
+            return
+
+        if line_width == 1:
             if self._draw_thin_line(cx1, cy1, cx2, cy2, length):
                 self._redraw_canvas()
         else:
             slope = ((cx2 - cx1) / length, (cy2 - cy1) / length)
             increment = slope[1] * self.rw, -slope[0] * self.rh
-            running = cx1 - increment[0] * (thickness - 1) / 2, cy1 - increment[1] * (thickness - 1) / 2, \
-                cx2 - increment[0] * (thickness - 1) / 2, cy2 - increment[1] * (thickness - 1) / 2
+            running = cx1 - increment[0] * (line_width - 1) / 2, cy1 - increment[1] * (line_width - 1) / 2, \
+                cx2 - increment[0] * (line_width - 1) / 2, cy2 - increment[1] * (line_width - 1) / 2
 
             updated = False
-            for i in range(thickness):
+            for i in range(line_width):
                 updated = self._draw_thin_line(*running, length) or updated
                 running = running[0] + increment[0], running[1] + increment[1], \
                     running[2] + increment[0], running[3] + increment[1]
@@ -220,3 +226,6 @@ class PixelCanvas(tk.Canvas):
     def set_bbox_visibility(self, visible=True):
         self.bbox_visibility = visible
         self._redraw_bboxes()
+
+    def set_line_width(self, width):
+        self.line_width = width
