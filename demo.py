@@ -12,7 +12,6 @@ WINDOW_SIZE = 28
 MODEL_PATH = "./model/air-model"
 
 
-print("Creating placeholders...")
 test_data = tf.placeholder(tf.float32, shape=[None, CANVAS_SIZE ** 2])
 test_targets = tf.placeholder(tf.int32, shape=[None])
 
@@ -26,7 +25,10 @@ air_model = AIRModel(
     train=False, reuse=False, scope="air",
 )
 
-with tf.Session() as sess:
+config = tf.ConfigProto()
+config.gpu_options.allow_growth = True
+
+with tf.Session(config=config) as sess:
     print("Restoring model...")
     tf.train.Saver().restore(sess, MODEL_PATH)
     wrapper = ModelWrapper(air_model, sess, test_data)

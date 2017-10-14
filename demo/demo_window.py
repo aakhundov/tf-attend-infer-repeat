@@ -25,6 +25,7 @@ class DemoWindow(ttk.Frame):
         self.columnconfigure(2, weight=0, minsize=100)
         self.rowconfigure(0, weight=1, minsize=200)
 
+        self.master.after(50, lambda: master.focus_force())
         self.master.after(100, self._reconstruct)
 
     def _create_controls(self):
