@@ -36,6 +36,6 @@ with tf.Session() as sess:
     master.title("Attend Infer Repeat - Live Demo")
     master.columnconfigure(0, weight=1)
     master.rowconfigure(0, weight=1)
-    window = DemoWindow(master, wrapper, CANVAS_SIZE)
+    window = DemoWindow(master, wrapper, CANVAS_SIZE, WINDOW_SIZE)
     window.grid(sticky=(tk.N, tk.S, tk.W, tk.E))
     master.mainloop()

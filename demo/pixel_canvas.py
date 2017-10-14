@@ -78,23 +78,23 @@ class PixelCanvas(tk.Canvas):
     def _get_image_coordinates(self, cx, cy):
         ceil_w = int(math.ceil(self.rw))
         if self.cw % ceil_w == 0:
-            i = int(math.floor(cy / self.rw))
+            j = int(math.floor(cx / self.rw))
         else:
             diff = self.w * ceil_w - self.cw
-            if cy < diff * (ceil_w - 1):
-                i = int(math.floor(cy / (ceil_w - 1)))
+            if cx < diff * (ceil_w - 1):
+                j = int(math.floor(cx / (ceil_w - 1)))
             else:
-                i = diff + int(math.floor((cy - diff * (ceil_w - 1)) / ceil_w))
+                j = diff + int(math.floor((cx - diff * (ceil_w - 1)) / ceil_w))
 
         ceil_h = int(math.ceil(self.rh))
         if self.ch % ceil_h == 0:
-            j = int(math.floor(cx / self.rh))
+            i = int(math.floor(cy / self.rh))
         else:
             diff = self.h * ceil_h - self.ch
-            if cx < diff * (ceil_h - 1):
-                j = int(math.floor(cx / (ceil_h - 1)))
+            if cy < diff * (ceil_h - 1):
+                i = int(math.floor(cy / (ceil_h - 1)))
             else:
-                j = diff + int(math.floor((cx - diff * (ceil_h - 1)) / ceil_h))
+                i = diff + int(math.floor((cy - diff * (ceil_h - 1)) / ceil_h))
 
         return i, j
 
