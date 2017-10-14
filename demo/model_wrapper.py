@@ -14,14 +14,15 @@ class ModelWrapper:
     def infer(self, images):
         all_digits, all_positions = [], []
         all_windows, all_latents = [], []
-        all_reconstructions = []
+        all_reconstructions, all_loss = [], []
 
-        rec_digits, rec_scales, rec_shifts, \
-            reconstructions, rec_windows, rec_latents = self.session.run(
+        rec_digits, rec_scales, rec_shifts, reconstructions, \
+            rec_windows, rec_latents, rec_loss = self.session.run(
                 [
                     self.model.rec_num_digits, self.model.rec_scales,
                     self.model.rec_shifts, self.model.reconstruction,
-                    self.model.rec_windows, self.model.rec_latents
+                    self.model.rec_windows, self.model.rec_latents,
+                    self.model.reconstruction_loss
                 ],
                 feed_dict={
                     self.data_placeholder: [np.ravel(img) for img in images]
@@ -46,5 +47,6 @@ class ModelWrapper:
             all_reconstructions.append(reconstruction)
             all_windows.append(np.array(windows))
             all_latents.append(np.array(latents))
+            all_loss.append(rec_loss[i])
 
-        return all_digits, all_positions, all_reconstructions, all_windows, all_latents
+        return all_digits, all_positions, all_reconstructions, all_windows, all_latents, all_loss

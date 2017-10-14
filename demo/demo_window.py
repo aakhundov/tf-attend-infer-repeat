@@ -24,6 +24,7 @@ class DemoWindow(ttk.Frame):
         self.columnconfigure(1, weight=410, minsize=210)
         self.columnconfigure(2, weight=140, minsize=65)
         self.rowconfigure(0, weight=1, minsize=220)
+        self.rowconfigure(1, weight=0, minsize=0)
 
         self.master.after(50, lambda: master.focus_force())
         self.master.after(100, self._reconstruct)
@@ -69,7 +70,7 @@ class DemoWindow(ttk.Frame):
                 padding=(5, 10 if i == 0 else 0, 10, 10 if i == 2 else 0)
             )
             lbl_win = ttk.Label(
-                frm_canvas_win, text="VAE rec. {0}:".format(i+1)
+                frm_canvas_win, text="VAE rec. #{0}:".format(i+1)
             )
             cnv_win = PixelCanvas(
                 frm_canvas_win, self.window_size, self.window_size, drawable=False,
@@ -88,8 +89,11 @@ class DemoWindow(ttk.Frame):
             self.lbl_win.append(lbl_win)
             self.cnv_win.append(cnv_win)
 
+        self.lbl_status = ttk.Label(self, borderwidth=1, relief="sunken", padding=(5, 2))
+        self.lbl_status.grid(row=1, column=0, columnspan=3, sticky=(tk.N, tk.S, tk.W, tk.E))
+
     def _reconstruct(self):
-        dig, pos, rec, win, lat = self.model_wrapper.infer(
+        dig, pos, rec, win, lat, loss = self.model_wrapper.infer(
             [self.cnv_orig.get_image()]
         )
 
@@ -106,5 +110,11 @@ class DemoWindow(ttk.Frame):
             else:
                 self.cnv_win[i].clear_image()
                 self.cnv_win[i].set_bbox_positions([])
+
+        self.lbl_status.configure(
+            text="Reconstruction loss (negative log-likelihood): {0:.3f}".format(
+                abs(loss[0])
+            )
+        )
 
         self.master.after(self.refresh_period, self._reconstruct)
