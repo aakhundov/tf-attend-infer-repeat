@@ -199,7 +199,8 @@ class PixelCanvas(tk.Canvas):
         self.last_x, self.last_y = e.x, e.y
 
     def _right_click(self, *_):
-        self.set_erasing_mode(not self.erasing)
+        self.clear_image()
+        # self.set_erasing_mode(not self.erasing)
 
     def _mouse_drag(self, e):
         self._draw_line(self.last_x, self.last_y, e.x, e.y)
