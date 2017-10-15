@@ -7,5 +7,6 @@ Concrete (Gumbel-Softmax) distribution proposed in [Maddison et al., 2016](https
 
 * **multi_mnist.py** needs to be run before training the model for generation of multi-MNIST dataset.
 * **training.py** is a runnable script for training the model with default configuration parameters (passed to a constructor of AIRModel class).
+* **demo.py** is a live demo of trained model's performance (using saved parameter values from **model** folder) that allows drawing digits in a  Python GUI and reconstructing them in real time.
 * **air/air_model.py** contains extensively configurable AIRModel class.
 * **air/transformer.py** is borrowed from [TensorFlow models repository](https://github.com/tensorflow/models/tree/master/transformer).

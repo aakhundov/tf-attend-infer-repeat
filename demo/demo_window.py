@@ -135,6 +135,9 @@ class DemoWindow(ttk.Frame):
         self.lbl_status = ttk.Label(self, borderwidth=1, relief="sunken", padding=(5, 2))
         self.lbl_status.grid(row=2, column=0, columnspan=3, sticky=(tk.N, tk.S, tk.W, tk.E))
 
+        self.cnv_orig.bind("<Button-2>", lambda *_: self.cnv_orig.clear_image())
+        self.cnv_orig.bind("<Button-3>", lambda *_: self.cnv_orig.clear_image())
+
         self.var_draw_mode.set(1)
         self.var_width.set("3")
         self.var_rate.set("50")

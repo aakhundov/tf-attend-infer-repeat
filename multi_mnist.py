@@ -267,8 +267,12 @@ def read_test_data(filename, shift_zero_digits_images=False):
         non_empty = [i for i in range(len(digits_list)) if digits_list[i] > 0]
 
         images_list, digits_list = np.array(images_list), np.array(digits_list)
-        images_list = np.concatenate([np.array([images_list[empty[0]]]), images_list[non_empty], images_list[empty[1:]]])
-        digits_list = np.concatenate([np.array([digits_list[empty[0]]]), digits_list[non_empty], digits_list[empty[1:]]])
+        images_list = np.concatenate([
+            np.array([images_list[empty[0]]]), images_list[non_empty], images_list[empty[1:]]
+        ])
+        digits_list = np.concatenate([
+            np.array([digits_list[empty[0]]]), digits_list[non_empty], digits_list[empty[1:]]
+        ])
 
     return images_list, digits_list
 
