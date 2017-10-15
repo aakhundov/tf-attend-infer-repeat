@@ -279,7 +279,7 @@ class AIRModel:
                  running_recon, running_loss, running_digits,
                  scales_ta, shifts_ta, z_pres_probs_ta,
                  z_pres_kls_ta, scale_kls_ta, shift_kls_ta, vae_kls_ta,
-                 st_backward_ta):
+                 st_backward_ta, windows_ta, latents_ta):
 
             with tf.variable_scope("rnn") as scope:
                 # RNN time step
@@ -334,11 +334,19 @@ class AIRModel:
 
             with tf.variable_scope("vae"):
                 # reconstructing the window in VAE
-                vae_recon, vae_mean, vae_log_variance = vae(
+                vae_recon, vae_mean, vae_log_variance, vae_latent = vae(
                     tf.reshape(window, [-1, self.windows_size * self.windows_size]), self.windows_size ** 2,
                     self.vae_recognition_units, self.vae_latent_dimensions, self.vae_generative_units,
                     self.vae_likelihood_std
                 )
+
+                # collecting individual reconstruction windows
+                # for each of the inferred digits on the canvas
+                windows_ta = windows_ta.write(windows_ta.size(), vae_recon)
+
+                # collecting individual latent variable values
+                # for each of the inferred digits on the canvas
+                latents_ta = latents_ta.write(latents_ta.size(), vae_latent)
 
             with tf.variable_scope("st_backward"):
                 # ST: theta of backward transformation
@@ -419,7 +427,8 @@ class AIRModel:
             running_digits += tf.cast(tf.less(stopping_sum, self.stopping_threshold), tf.int32)
 
             with tf.variable_scope("canvas"):
-                # adding reconstructed patch scaled
+                # continuous relaxation:
+                # adding reconstructed window scaled
                 # by z_pres to the running canvas
                 running_recon += tf.where(
                     tf.less(stopping_sum, self.stopping_threshold),
@@ -496,7 +505,7 @@ class AIRModel:
                 running_recon, running_loss, running_digits, \
                 scales_ta, shifts_ta, z_pres_probs_ta, \
                 z_pres_kls_ta, scale_kls_ta, shift_kls_ta, vae_kls_ta, \
-                st_backward_ta
+                st_backward_ta, windows_ta, latents_ta
 
         if self.cnn:
             with tf.variable_scope("cnn") as cnn_scope:
@@ -534,7 +543,8 @@ class AIRModel:
 
             # RNN while_loop with variable number of steps for each batch item
             _, _, _, reconstruction, loss, self.rec_num_digits, scales, shifts, \
-                z_pres_probs, z_pres_kls, scale_kls, shift_kls, vae_kls, st_backward = tf.while_loop(
+                z_pres_probs, z_pres_kls, scale_kls, shift_kls, vae_kls, \
+                st_backward, windows, latents = tf.while_loop(
                     cond, body, [
                         tf.constant(0),                                 # RNN time step, initially zero
                         tf.zeros([self.batch_size]),                    # running sum of z_pres samples
@@ -549,7 +559,9 @@ class AIRModel:
                         tf.TensorArray(dtype=tf.float32, size=0, dynamic_size=True),   # scale KL-divergence
                         tf.TensorArray(dtype=tf.float32, size=0, dynamic_size=True),   # shift KL-divergence
                         tf.TensorArray(dtype=tf.float32, size=0, dynamic_size=True),   # VAE KL-divergence
-                        tf.TensorArray(dtype=tf.float32, size=0, dynamic_size=True)    # backward ST matrices
+                        tf.TensorArray(dtype=tf.float32, size=0, dynamic_size=True),   # backward ST matrices
+                        tf.TensorArray(dtype=tf.float32, size=0, dynamic_size=True),   # individual recon. windows
+                        tf.TensorArray(dtype=tf.float32, size=0, dynamic_size=True)    # latents of individual digits
                     ]
                 )
 
@@ -557,6 +569,8 @@ class AIRModel:
         self.rec_scales = tf.transpose(scales.stack(), (1, 0, 2), name="rec_scales")
         self.rec_shifts = tf.transpose(shifts.stack(), (1, 0, 2), name="rec_shifts")
         self.rec_st_back = tf.transpose(st_backward.stack(), (1, 0, 2, 3), name="rec_st_back")
+        self.rec_windows = tf.transpose(windows.stack(), (1, 0, 2), name="rec_windows")
+        self.rec_latents = tf.transpose(latents.stack(), (1, 0, 2), name="rec_windows")
         self.z_pres_probs = tf.transpose(z_pres_probs.stack(), name="z_pres_probs")
         self.z_pres_kls = tf.transpose(z_pres_kls.stack(), name="z_pres_kls")
         self.scale_kls = tf.transpose(scale_kls.stack(), name="scale_kls")
