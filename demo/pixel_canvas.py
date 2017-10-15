@@ -28,10 +28,8 @@ class PixelCanvas(tk.Canvas):
         if drawable:
             self.erasing = False
             self.line_width = line_width
-            self.bind("<Button-1>", self._left_click)
-            self.bind("<Button-2>", self._right_click)  # Mac OS
-            self.bind("<Button-3>", self._right_click)  # Windows
-            self.bind("<B1-Motion>", self._mouse_drag)
+            self.bind("<Button-1>", self._left_click_event)
+            self.bind("<B1-Motion>", self._mouse_drag_event)
 
         self.bbox_ids = self._create_bboxes()
         self.bbox_visibility = True
@@ -176,15 +174,12 @@ class PixelCanvas(tk.Canvas):
         return bbox_ids
 
     def _redraw_bboxes(self):
-        if self.bbox_visibility:
-            for i in range(len(self.bbox_ids)):
-                if len(self.bbox_positions) > i:
-                    self.coords(self.bbox_ids[i], self._get_bbox_coordinates(self.bbox_positions[i]))
-                    self.itemconfig(self.bbox_ids[i], state="normal")
-                else:
-                    self.itemconfig(self.bbox_ids[i], state="hidden")
-        else:
-            self.itemconfig(self.bbox_ids, state="hidden")
+        for i in range(len(self.bbox_ids)):
+            if self.bbox_visibility and len(self.bbox_positions) > i:
+                self.coords(self.bbox_ids[i], self._get_bbox_coordinates(self.bbox_positions[i]))
+                self.itemconfig(self.bbox_ids[i], state="normal")
+            else:
+                self.itemconfig(self.bbox_ids[i], state="hidden")
 
     def _get_bbox_coordinates(self, position):
         scale, shift_x, shift_y = position
@@ -195,14 +190,10 @@ class PixelCanvas(tk.Canvas):
 
         return lx, ly, rx, ry
 
-    def _left_click(self, e):
+    def _left_click_event(self, e):
         self.last_x, self.last_y = e.x, e.y
 
-    def _right_click(self, *_):
-        self.clear_image()
-        # self.set_erasing_mode(not self.erasing)
-
-    def _mouse_drag(self, e):
+    def _mouse_drag_event(self, e):
         self._draw_line(self.last_x, self.last_y, e.x, e.y)
         self.last_x, self.last_y = e.x, e.y
 
