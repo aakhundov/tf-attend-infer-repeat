@@ -59,7 +59,7 @@ def collect_data_info(digits, indices, positions, boxes, labels):
     return all_info
 
 
-def collect_reconstruction_info(digits, positions, latents):
+def collect_reconstruction_info(digits, positions, windows, latents):
     all_info = []
 
     for i in range(len(digits)):
@@ -72,6 +72,7 @@ def collect_reconstruction_info(digits, positions, latents):
             rec_digit_info = {
                 "scale": positions[i][j][0],
                 "shift": positions[i][j][1:],
+                "window": np.reshape(windows[i][j], (WINDOW_SIZE, WINDOW_SIZE)),
                 "latent": latents[i][j]
             }
 
@@ -82,7 +83,7 @@ def collect_reconstruction_info(digits, positions, latents):
     return all_info
 
 
-def match_data_with_rec(data_info, reconstruction_info, images, max_distance=0.2):
+def match_data_with_rec(data_info, reconstruction_info, max_distance=0.1):
     all_info = []
 
     for img in range(len(data_info)):
@@ -101,15 +102,10 @@ def match_data_with_rec(data_info, reconstruction_info, images, max_distance=0.2
                 all_info.append({
                     "id": data_info[img]["digits"][dig]["id"],
                     "label": data_info[img]["digits"][dig]["label"],
+                    "image": reconstruction_info[img]["digits"][closest_digit]["window"],
                     "latent": reconstruction_info[img]["digits"][closest_digit]["latent"]
                 })
                 taken.append(closest_digit)
-
-    for img in range(len(all_info)):
-        all_info[img]["image"] = np.reshape(
-            images[all_info[img]["id"]],
-            (WINDOW_SIZE, WINDOW_SIZE)
-        )
 
     return all_info
 
@@ -178,13 +174,13 @@ with tf.Session(config=session_config) as sess:
 
     print("Reconstructing data...")
     rec_digits, rec_positions, _, rec_windows, rec_latents, _ = wrapper.infer(dat_images)
-    rec_info = collect_reconstruction_info(rec_digits, rec_positions, rec_latents)
+    rec_info = collect_reconstruction_info(rec_digits, rec_positions, rec_windows, rec_latents)
 
 print("Reading MNIST data...")
 mnist = input_data.read_data_sets(MNIST_FOLDER, validation_size=0)
 
 print("Matching original AIR data with reconstructions...")
-latent_info = match_data_with_rec(dat_info, rec_info, mnist.train.images, max_distance=0.1)
+latent_info = match_data_with_rec(dat_info, rec_info, max_distance=0.1)
 
 label_dic = {d: 0 for d in range(10)}
 for info in latent_info:
