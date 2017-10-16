@@ -255,12 +255,31 @@ def read_test_data(filename, shift_zero_digits_images=False):
     record_iterator = tf.python_io.tf_record_iterator(path=filename)
 
     images_list, digits_list = [], []
+    indices_list, positions_list = [], []
+    boxes_list, labels_list = [], []
     for string_record in record_iterator:
         example = tf.train.Example()
         example.ParseFromString(string_record)
 
         images_list.append(np.fromstring(example.features.feature['image'].bytes_list.value[0], dtype=np.float32))
         digits_list.append(int(example.features.feature['digits'].int64_list.value[0]))
+
+        indices_list.append(np.fromstring(
+            example.features.feature['indices'].bytes_list.value[0],
+            dtype=np.int32
+        )[:digits_list[-1]])
+        positions_list.append(np.fromstring(
+            example.features.feature['positions'].bytes_list.value[0],
+            dtype=np.int32
+        )[:digits_list[-1]*2])
+        boxes_list.append(np.fromstring(
+            example.features.feature['boxes'].bytes_list.value[0],
+            dtype=np.int32
+        )[:digits_list[-1]*2])
+        labels_list.append(np.fromstring(
+            example.features.feature['labels'].bytes_list.value[0],
+            dtype=np.int32
+        )[:digits_list[-1]])
 
     if shift_zero_digits_images:
         empty = [i for i in range(len(digits_list)) if digits_list[i] == 0]
@@ -274,7 +293,7 @@ def read_test_data(filename, shift_zero_digits_images=False):
             np.array([digits_list[empty[0]]]), digits_list[non_empty], digits_list[empty[1:]]
         ])
 
-    return images_list, digits_list
+    return images_list, digits_list, indices_list, positions_list, boxes_list, labels_list
 
 
 if __name__ == "__main__":
