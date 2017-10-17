@@ -151,7 +151,7 @@ with tf.Session(config=config) as sess:
     print("Reading test set...")
     # reading the test dataset, to be used with test model for
     # computing all summaries throughout the training process
-    test_images, test_num_digits = read_test_data(
+    test_images, test_num_digits, *_ = read_test_data(
         TEST_DATA_FILE, shift_zero_digits_images=True
     )
 
