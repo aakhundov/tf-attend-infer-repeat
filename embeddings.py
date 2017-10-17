@@ -180,7 +180,7 @@ print("Reading MNIST data...")
 mnist = input_data.read_data_sets(MNIST_FOLDER, validation_size=0)
 
 print("Matching original AIR data with reconstructions...")
-latent_info = match_data_with_rec(dat_info, rec_info, max_distance=0.1)
+latent_info = match_data_with_rec(dat_info, rec_info, max_distance=0.2)
 
 label_dic = {d: 0 for d in range(10)}
 for info in latent_info:
