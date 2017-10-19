@@ -8,7 +8,7 @@ class DemoWindow(ttk.Frame):
 
     def __init__(self, master, model_wrapper,
                  canvas_size=50, window_size=28,
-                 refresh_period=50, **kw):
+                 refresh_period=50, test_image=None, **kw):
 
         ttk.Frame.__init__(self, master=master, **kw)
 
@@ -19,6 +19,9 @@ class DemoWindow(ttk.Frame):
         self.refresh_period = refresh_period
 
         self._create_interface()
+
+        if test_image is not None:
+            self.cnv_orig.set_image(test_image)
 
         self.columnconfigure(0, weight=410, minsize=215)
         self.columnconfigure(1, weight=410, minsize=210)
@@ -156,7 +159,7 @@ class DemoWindow(ttk.Frame):
             if i < len(win[0]):
                 self.cnv_win[i].set_image(win[0][i])
                 self.cnv_win[i].set_bbox_positions(
-                    [[0.0, -2.0, -2.0]] * i + [[0.98, 0.0, 0.0]]
+                    [[0.0, -2.0, -2.0]] * i + [[0.99, 0.0, 0.0]]
                 )
             else:
                 self.cnv_win[i].clear_image()
