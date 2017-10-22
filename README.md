@@ -20,6 +20,6 @@ After applying the continuous relaxation, 10 out of 10 training runs in a row co
 ![alt text](images/digit_acc_all.png "digit count accuracy on the entire validation set")
 ![alt text](images/digit_acc_012.png "digit count accuracy on 0-, 1-, and 2-digit (left to right) subsets of validation set")
 
-Attention/reconstruction samples of a trained model (for each pair: original on the left, reconstruction on the right; red window corresponds to the first attention step, green – to the second one):
+The samples of attention/reconstruction made by an AIR model trained with **traning.py**[training.py] (for each pair: original on the left, reconstruction on the right; red attention window corresponds to the first time step, green – to the second one):
 
-![alt text](images/rec_samples.png "attention/reconstruction samples")
+![alt text](images/rec_samples.png "AIR attention/reconstruction samples")
