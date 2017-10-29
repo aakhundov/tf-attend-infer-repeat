@@ -1,7 +1,7 @@
 Attend, Infer, Repeat
 =====================
 
-Implementation of continuous relaxation of **AIR** framework proposed in **"Attend, Infer, Repeat: Fast Scene Understanding with Generative Models"** [(Eslami et al., 2016)](https://arxiv.org/abs/1603.08575). The work has been done in equal contributions with [Alexander Prams](https://github.com/aprams). The model is implemented in TensorFlow.
+Implementation of continuous relaxation of **AIR** framework proposed in **"Attend, Infer, Repeat: Fast Scene Understanding with Generative Models"** ([Eslami et al., 2016](https://arxiv.org/abs/1603.08575)). The work has been done in equal contributions with [Alexander Prams](https://github.com/aprams). The model is implemented in TensorFlow.
 
 * [**multi_mnist.py**](multi_mnist.py) needs to be run before training the model for generation of multi-MNIST dataset: 60,000 50x50-pixel images with 0, 1, or 2 random non-overlapping MNIST digits.
 * [**training.py**](training.py) is a runnable script for training the model with default hyperparameter configuration parameters (passed to the constructor of AIRModel class). While  training takes place, its progress is written to the sub-folders of "air_results" folder: complete snapshot of the source code in "source", periodic model checkpoints in "model", and rich TensorBoard summaries (including attention/reconstruction samples) in "summary".
